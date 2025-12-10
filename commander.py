@@ -4,21 +4,15 @@ import json
 import time
 import re
 import ast
-from openai import OpenAI
+# 引入你写好的核心模块（带缓存，带智谱配置）
+from core.llm_client import get_client
 from robot_controller import RobotController
 
-# --- 1. 自动加载配置 ---
-try:
-    api_key = st.secrets["SILICONFLOW_API_KEY"]
-    base_url = "https://api.siliconflow.cn/v1"
-    # 🔥 核心更换：改用 Coder 模型，它对 JSON 格式的执行力极强，极少犯错
-    model_name = "Qwen/Qwen2.5-Coder-32B-Instruct" 
-except:
-    # API Key 未配置时的占位符（仅用于开发环境，上传时请注释或删除）
-    api_key = None
-    base_url = ""
+# --- 1. 使用统一的客户端 ---
+client = get_client()
 
-client = OpenAI(api_key=api_key, base_url=base_url)
+# 🔥 核心更换：改用 Coder 模型，它对 JSON 格式的执行力极强，极少犯错
+model_name = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # --- 2. 初始化控制器 ---
 if "controller" not in st.session_state:
