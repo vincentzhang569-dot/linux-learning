@@ -22,23 +22,17 @@ except ImportError:
 # 2. 直接拿来用（这时候拿到的就是那个"秒回"的客户端）
 client = get_client()
 
+# === 全局通用 System Prompt ===
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": "你是一个严谨的工业维修专家。请直接根据用户的故障描述，输出Markdown格式的排查清单。禁止反问，禁止废话。"
+}
+
 # === 重构后的核心上下文 (双样本对比) ===
 # 这些内容会发送给 AI 作为上下文，但不会显示给用户
 SYSTEM_CONTEXT = [
-    # 1. 核心人设：强调根据输入动态调整
-    {
-        "role": "system", 
-        "content": """
-        你是一位工业维修专家。
-        任务：根据用户输入的【具体故障现象】，生成针对性的排查方案。
-        
-        【严重警告】：
-        - 禁止抄袭范例内容！
-        - 如果用户问"电机"，就回答电机相关内容。
-        - 如果用户问"通讯/网络"，必须回答网线、IP地址、干扰等内容，绝不能出现电机、轴承等无关词汇！
-        - 格式必须保持 Markdown 列表。
-        """
-    },
+    # 1. 核心人设：使用简化的 System Prompt
+    SYSTEM_PROMPT,
     
     # 2. 范例 A：硬件类故障 (教会它怎么答硬件)
     {
@@ -661,20 +655,6 @@ def generate_word_export(messages, doc_name=""):
 # --- 初始化状态 ---
 
 # 1. 基础 System Prompt（通用兼容版）
-SYSTEM_PROMPT = """你是一位拥有20年经验的工业自动化维修专家。
-
-【你的行为准则】：
-
-1. **遇到工业/技术问题**：请拿出专家身份，进行故障分析、列出排查步骤、提示安全警告。
-
-2. **收到简短的故障名词**（如"伺服电机故障"、"通讯超时"）：请直接列出该故障最常见的3-5个原因和对应的排查步骤，不要反问用户。回答风格要干练、专业，使用列表形式。
-
-3. **遇到日常/通用问题**（如生活、农业、编程、常识等）：**请勿拒绝**，直接用通俗易懂的语言正常回答。
-
-4. **风格要求**：回答简练、直接，不废话。不要反问用户，直接给出答案。
-
-不要说"我只是工业专家无法回答"，请直接给出答案。"""
-
 # 2. 深度思考 System Prompt（专家兼容版）
 SYSTEM_PROMPT_DEEP = """你是一位拥有广博知识的 AI 助手，在工业机器人领域拥有 20 年深度经验。
 
@@ -724,22 +704,13 @@ if "uploaded_image" not in st.session_state:
 if "deep_think_mode" not in st.session_state:
     st.session_state.deep_think_mode = False
 
-# 预设问题（Quick Prompts）- 工业现场快速提问
-QUICK_PROMPTS = [
-    "查伺服电机故障",
-    "查通讯超时",
-    "ABB 机器人错误代码大全",
-    "编码器故障排查",
-    "PLC 通讯异常"
-]
-
-# 快捷按钮文字到完整问句的映射（强引导格式）
-QUICK_PROMPT_MAPPING = {
-    "查伺服电机故障": "我的设备出现了【伺服电机故障】，请列出维修方案。",
-    "查通讯超时": "我的设备出现了【通讯超时】，请列出维修方案。",
-    "ABB 机器人错误代码大全": "我的设备出现了【ABB机器人错误】，请列出错误代码和维修方案。",
-    "编码器故障排查": "我的设备出现了【编码器故障】，请列出维修方案。",
-    "PLC 通讯异常": "我的设备出现了【PLC通讯异常】，请列出维修方案。"
+# 定义针对性的提示词模板
+prompt_templates = {
+    "servo": "我的设备出现了【伺服电机故障】。请列出排查步骤（硬件、电气、参数）。",
+    "comm": "我的设备出现了【通讯超时】。请列出排查步骤（物理连接、网络配置、干扰）。",
+    "abb": "我的设备出现了【ABB机器人错误】。请列出常见错误代码和维修方案。",
+    "encoder": "我的设备出现了【编码器故障】。请列出排查步骤。",
+    "plc": "我的设备出现了【PLC通讯异常】。请列出排查步骤。"
 }
 
 # --- 3. 界面布局 (移动端优化) ---
@@ -911,22 +882,39 @@ with st.sidebar:
 
 # --- 4. 聊天区域 (移动端优化) ---
 
-# === 预设问题按钮 (Quick Prompts) - 工业现场快速提问 ===
-st.markdown("**⚡ 快速提问（点击下方按钮）**")
+# === 快速诊断按钮区域 ===
+st.markdown("### ⚡ 快速诊断")
 
-# 使用列布局显示预设问题按钮
-# PC端：5个按钮并排；移动端：自动换行
-prompt_cols = st.columns(5)
-for idx, prompt_text in enumerate(QUICK_PROMPTS):
-    with prompt_cols[idx]:
-        if st.button(
-            prompt_text, 
-            key=f"quick_prompt_{idx}",
-            use_container_width=True,
-            help=f"快速提问：{prompt_text}"
-        ):
-            st.session_state.pending_quick_action = prompt_text
-            st.rerun()
+col1, col2, col3, col4 = st.columns(4)
+
+# 定义一个辅助函数，点击即清空历史
+def quick_ask(prompt_key):
+    # 1. 暴力清空历史，防止上下文污染
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
+        }
+    ]
+    # 2. 发送新的强引导指令
+    st.session_state.pending_quick_action = prompt_templates[prompt_key]
+    st.rerun()
+
+with col1:
+    if st.button("查询伺服电机故障", use_container_width=True):
+        quick_ask("servo")
+
+with col2:
+    if st.button("查通讯超时", use_container_width=True):
+        quick_ask("comm")
+        
+with col3:
+    if st.button("ABB 机器人错误", use_container_width=True):
+        quick_ask("abb")
+
+with col4:
+    if st.button("编码器故障", use_container_width=True):
+        quick_ask("encoder")
 
 st.markdown("---")
 
@@ -938,16 +926,37 @@ if st.session_state.pdf_content:
     
     with col1:
         if st.button("📄 全文摘要", use_container_width=True, help="一键生成文档全文摘要"):
+            # 强制失忆：清空所有历史记录，避免上下文错乱
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
+                }
+            ]
             st.session_state.pending_quick_action = "请为这份文档生成一份详细的全文摘要，包括主要章节、核心内容和关键要点。"
             st.rerun()
     
     with col2:
         if st.button("🔧 故障诊断", use_container_width=True, help="快速进入故障排查模式"):
+            # 强制失忆：清空所有历史记录，避免上下文错乱
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
+                }
+            ]
             st.session_state.pending_quick_action = "请列出这份文档中涉及的所有故障代码、故障原因和对应的解决方案。如果文档中没有相关内容，请说明。"
             st.rerun()
     
     with col3:
         if st.button("⚠️ 安全须知", use_container_width=True, help="查看安全操作注意事项"):
+            # 强制失忆：清空所有历史记录，避免上下文错乱
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
+                }
+            ]
             st.session_state.pending_quick_action = "请提取这份文档中所有关于安全操作、注意事项、警告信息的内容，并按重要性排序。"
             st.rerun()
 
@@ -978,9 +987,8 @@ def image_to_base64(image):
 # 处理快捷指令
 prompt = None
 if st.session_state.pending_quick_action:
-    # 将快捷按钮文字映射为完整问句
-    quick_text = st.session_state.pending_quick_action
-    prompt = QUICK_PROMPT_MAPPING.get(quick_text, quick_text)  # 如果找不到映射，使用原文字
+    # 直接使用模板中的完整问句
+    prompt = st.session_state.pending_quick_action
     st.session_state.pending_quick_action = None  # 清除标志
 
 # 处理用户手动输入
@@ -1018,7 +1026,7 @@ if prompt:
     pdf_text = st.session_state.pdf_content
     
     # --- 逻辑修改：根据开关决定基础 Prompt ---
-    current_base_prompt = SYSTEM_PROMPT_DEEP if st.session_state.deep_think_mode else SYSTEM_PROMPT
+    current_base_prompt = SYSTEM_PROMPT_DEEP if st.session_state.deep_think_mode else SYSTEM_PROMPT["content"]
     
     # 结合文档内容
     if pdf_text:
@@ -1068,21 +1076,24 @@ if prompt:
                     })
                 
                 # 构建消息列表（OpenAI 标准格式）
-                # 1. 先添加 SYSTEM_CONTEXT（隐藏的训练范例）
-                messages = SYSTEM_CONTEXT.copy()
-                
-                # 2. 如果有文档，添加文档相关的 system prompt（覆盖 SYSTEM_CONTEXT 中的 system message）
+                # 1. 确保第一个元素永远是 SYSTEM_PROMPT
                 if pdf_text:
-                    # 替换 SYSTEM_CONTEXT 中的 system message
-                    messages[0] = {"role": "system", "content": system_prompt}
+                    # 如果有文档，使用文档相关的 system prompt
+                    current_system_prompt = {"role": "system", "content": system_prompt}
                 else:
-                    # 如果没有文档，使用 SYSTEM_CONTEXT 中的 system message（已经在 messages 开头）
-                    pass
+                    # 如果没有文档，使用全局 SYSTEM_PROMPT
+                    current_system_prompt = SYSTEM_PROMPT
+                
+                messages = [current_system_prompt]
+                
+                # 2. 添加 Few-Shot 范例（从 SYSTEM_CONTEXT 中提取，跳过第一个 system message）
+                # SYSTEM_CONTEXT[1:] 会跳过第一个元素（system message），只保留范例
+                messages.extend(SYSTEM_CONTEXT[1:])
                 
                 # 3. 添加历史消息（过滤掉 system 和 assistant 欢迎消息）
                 # 注意：当前用户消息已经在 st.session_state.messages 中，所以需要排除最后一条
                 for msg in st.session_state.messages[:-1]:
-                    # 跳过 system 消息（已经在 SYSTEM_CONTEXT 中）
+                    # 跳过 system 消息（已经在 messages 开头）
                     if msg.get("role") == "system":
                         continue
                     # 跳过欢迎消息（assistant 的第一条消息）
