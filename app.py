@@ -643,9 +643,38 @@ SYSTEM_PROMPT_DEEP = """你是一位拥有广博知识的 AI 助手，在工业�
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
+        # 1. 核心指令：极简主义，强制要求输出
         {
             "role": "system",
-            "content": "你是一位工业维修专家。无论用户输入什么（哪怕只是一个词），你都要立刻假设这是机器发生了故障，并直接给出最可能的 3-5 个原因和排查方案。**绝对不要反问用户，绝对不要说由于信息不足无法回答。** 直接开始列出方案。"
+            "content": "你是一个工业故障排查数据库。用户输入任何故障名词，你必须立即列出排查步骤和原因。禁止反问，禁止客套，直接输出 Markdown 列表。"
+        },
+        # 2. 范例-用户输入 (Few-Shot Example User)
+        {
+            "role": "user",
+            "content": "查伺服电机故障"
+        },
+        # 3. 范例-AI标准回答 (Few-Shot Example Assistant - 使用千问的优秀回答作为模板)
+        {
+            "role": "assistant",
+            "content": """
+### 伺服电机故障诊断指南
+
+**1. 观察现象**
+*   伺服电机是否产生异常声音？
+*   电机是否运行不稳定或过热？
+
+**2. 检查电源和接线**
+*   确认电源电压稳定。
+*   检查动力线和编码器线是否断路或接触不良。
+
+**3. 检查驱动器**
+*   查看驱动器面板是否有错误代码（Error Code）。
+*   检查参数配置（增益、电子齿轮比）是否正确。
+
+**4. 机械侧检查**
+*   检查负载是否过大或卡死。
+*   联轴器是否松动。
+"""
         }
     ]
 if "current_file" not in st.session_state:
@@ -820,11 +849,40 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     if st.button("🗑️ 清空对话/重置大脑", use_container_width=True, type="primary"):
-        # 完全清空对话记录，只保留 system message
+        # 完全清空对话记录，重置为 Few-Shot 范例
         st.session_state.messages = [
+            # 1. 核心指令：极简主义，强制要求输出
             {
                 "role": "system",
-                "content": "你是一位工业维修专家。无论用户输入什么（哪怕只是一个词），你都要立刻假设这是机器发生了故障，并直接给出最可能的 3-5 个原因和排查方案。**绝对不要反问用户，绝对不要说由于信息不足无法回答。** 直接开始列出方案。"
+                "content": "你是一个工业故障排查数据库。用户输入任何故障名词，你必须立即列出排查步骤和原因。禁止反问，禁止客套，直接输出 Markdown 列表。"
+            },
+            # 2. 范例-用户输入 (Few-Shot Example User)
+            {
+                "role": "user",
+                "content": "查伺服电机故障"
+            },
+            # 3. 范例-AI标准回答 (Few-Shot Example Assistant - 使用千问的优秀回答作为模板)
+            {
+                "role": "assistant",
+                "content": """
+### 伺服电机故障诊断指南
+
+**1. 观察现象**
+*   伺服电机是否产生异常声音？
+*   电机是否运行不稳定或过热？
+
+**2. 检查电源和接线**
+*   确认电源电压稳定。
+*   检查动力线和编码器线是否断路或接触不良。
+
+**3. 检查驱动器**
+*   查看驱动器面板是否有错误代码（Error Code）。
+*   检查参数配置（增益、电子齿轮比）是否正确。
+
+**4. 机械侧检查**
+*   检查负载是否过大或卡死。
+*   联轴器是否松动。
+"""
             }
         ]
         st.session_state.uploaded_image = None
