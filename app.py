@@ -1,6 +1,8 @@
 import streamlit as st
 import pdfplumber
+# 1. 导入你写好的那个带缓存的文件
 from core.llm_client import get_client, SILICONFLOW_MODEL
+
 from datetime import datetime
 from io import BytesIO
 import hashlib
@@ -17,7 +19,7 @@ try:
 except ImportError:
     DOCX_AVAILABLE = False
 
-# 使用统一封装的硅基流动客户端
+# 2. 直接拿来用（这时候拿到的就是那个"秒回"的客户端）
 client = get_client()
 
 # --- 1. 页面配置 (移动端优先) ---
