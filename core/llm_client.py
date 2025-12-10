@@ -10,7 +10,7 @@ ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
 # 你在 app.py 里用到的视觉模型名，保持一致
 
-SILICONFLOW_MODEL = "Qwen/Qwen2-VL-72B-Instruct"
+SILICONFLOW_MODEL = "glm-4-flash"
 
 @st.cache_resource
 
