@@ -22,6 +22,44 @@ except ImportError:
 # 2. 直接拿来用（这时候拿到的就是那个"秒回"的客户端）
 client = get_client()
 
+# --- 全局范例变量 (Hidden Context) ---
+# 这些内容会发送给 AI 作为上下文，但不会显示给用户
+SYSTEM_CONTEXT = [
+    # 1. 核心指令：极简主义，强制要求输出
+    {
+        "role": "system",
+        "content": "你是一个工业故障排查数据库。用户输入任何故障名词，你必须立即列出排查步骤和原因。禁止反问，禁止客套，直接输出 Markdown 列表。"
+    },
+    # 2. 范例-用户输入 (Few-Shot Example User)
+    {
+        "role": "user",
+        "content": "查伺服电机故障"
+    },
+    # 3. 范例-AI标准回答 (Few-Shot Example Assistant - 使用千问的优秀回答作为模板)
+    {
+        "role": "assistant",
+        "content": """
+### 伺服电机故障诊断指南
+
+**1. 观察现象**
+*   伺服电机是否产生异常声音？
+*   电机是否运行不稳定或过热？
+
+**2. 检查电源和接线**
+*   确认电源电压稳定。
+*   检查动力线和编码器线是否断路或接触不良。
+
+**3. 检查驱动器**
+*   查看驱动器面板是否有错误代码（Error Code）。
+*   检查参数配置（增益、电子齿轮比）是否正确。
+
+**4. 机械侧检查**
+*   检查负载是否过大或卡死。
+*   联轴器是否松动。
+"""
+    }
+]
+
 # --- 1. 页面配置 (移动端优先) ---
 # st.set_page_config(
 #     page_title="工业智脑 Mobile",
@@ -642,39 +680,11 @@ SYSTEM_PROMPT_DEEP = """你是一位拥有广博知识的 AI 助手，在工业�
 请根据用户的问题类型自动切换回答模式。"""
 
 if "messages" not in st.session_state:
+    # 只显示给用户的欢迎消息，不包含训练范例
     st.session_state.messages = [
-        # 1. 核心指令：极简主义，强制要求输出
-        {
-            "role": "system",
-            "content": "你是一个工业故障排查数据库。用户输入任何故障名词，你必须立即列出排查步骤和原因。禁止反问，禁止客套，直接输出 Markdown 列表。"
-        },
-        # 2. 范例-用户输入 (Few-Shot Example User)
-        {
-            "role": "user",
-            "content": "查伺服电机故障"
-        },
-        # 3. 范例-AI标准回答 (Few-Shot Example Assistant - 使用千问的优秀回答作为模板)
         {
             "role": "assistant",
-            "content": """
-### 伺服电机故障诊断指南
-
-**1. 观察现象**
-*   伺服电机是否产生异常声音？
-*   电机是否运行不稳定或过热？
-
-**2. 检查电源和接线**
-*   确认电源电压稳定。
-*   检查动力线和编码器线是否断路或接触不良。
-
-**3. 检查驱动器**
-*   查看驱动器面板是否有错误代码（Error Code）。
-*   检查参数配置（增益、电子齿轮比）是否正确。
-
-**4. 机械侧检查**
-*   检查负载是否过大或卡死。
-*   联轴器是否松动。
-"""
+            "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
         }
     ]
 if "current_file" not in st.session_state:
@@ -849,40 +859,11 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     if st.button("🗑️ 清空对话/重置大脑", use_container_width=True, type="primary"):
-        # 完全清空对话记录，重置为 Few-Shot 范例
+        # 完全清空对话记录，只显示欢迎消息（训练范例在 SYSTEM_CONTEXT 中，不会显示）
         st.session_state.messages = [
-            # 1. 核心指令：极简主义，强制要求输出
-            {
-                "role": "system",
-                "content": "你是一个工业故障排查数据库。用户输入任何故障名词，你必须立即列出排查步骤和原因。禁止反问，禁止客套，直接输出 Markdown 列表。"
-            },
-            # 2. 范例-用户输入 (Few-Shot Example User)
-            {
-                "role": "user",
-                "content": "查伺服电机故障"
-            },
-            # 3. 范例-AI标准回答 (Few-Shot Example Assistant - 使用千问的优秀回答作为模板)
             {
                 "role": "assistant",
-                "content": """
-### 伺服电机故障诊断指南
-
-**1. 观察现象**
-*   伺服电机是否产生异常声音？
-*   电机是否运行不稳定或过热？
-
-**2. 检查电源和接线**
-*   确认电源电压稳定。
-*   检查动力线和编码器线是否断路或接触不良。
-
-**3. 检查驱动器**
-*   查看驱动器面板是否有错误代码（Error Code）。
-*   检查参数配置（增益、电子齿轮比）是否正确。
-
-**4. 机械侧检查**
-*   检查负载是否过大或卡死。
-*   联轴器是否松动。
-"""
+                "content": "🤖 您好！我是您的工业故障诊断专家，请直接输入故障名称，我会立即给出排查方案。"
             }
         ]
         st.session_state.uploaded_image = None
@@ -1068,12 +1049,25 @@ if prompt:
                     })
                 
                 # 构建消息列表（OpenAI 标准格式）
-                messages = [{"role": "system", "content": system_prompt}]
+                # 1. 先添加 SYSTEM_CONTEXT（隐藏的训练范例）
+                messages = SYSTEM_CONTEXT.copy()
                 
-                # 添加历史消息（过滤掉 system 消息，因为我们已经添加了新的 system prompt）
+                # 2. 如果有文档，添加文档相关的 system prompt（覆盖 SYSTEM_CONTEXT 中的 system message）
+                if pdf_text:
+                    # 替换 SYSTEM_CONTEXT 中的 system message
+                    messages[0] = {"role": "system", "content": system_prompt}
+                else:
+                    # 如果没有文档，使用 SYSTEM_CONTEXT 中的 system message（已经在 messages 开头）
+                    pass
+                
+                # 3. 添加历史消息（过滤掉 system 和 assistant 欢迎消息）
+                # 注意：当前用户消息已经在 st.session_state.messages 中，所以需要排除最后一条
                 for msg in st.session_state.messages[:-1]:
-                    # 跳过 system 消息
+                    # 跳过 system 消息（已经在 SYSTEM_CONTEXT 中）
                     if msg.get("role") == "system":
+                        continue
+                    # 跳过欢迎消息（assistant 的第一条消息）
+                    if msg.get("role") == "assistant" and "您好" in str(msg.get("content", "")):
                         continue
                     # 历史消息可能是简单格式或复杂格式
                     if isinstance(msg.get("content"), list):
@@ -1086,7 +1080,7 @@ if prompt:
                             "content": msg["content"]
                         })
                 
-                # 添加当前用户消息
+                # 4. 添加当前用户消息（最后一条，包含图片等复杂内容）
                 messages.append({
                     "role": "user",
                     "content": user_content
