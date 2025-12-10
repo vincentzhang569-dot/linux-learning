@@ -5,14 +5,11 @@ import time
 import re
 import ast
 # 引入你写好的核心模块（带缓存，带智谱配置）
-from core.llm_client import get_client
+from core.llm_client import get_client, MODEL_NAME
 from robot_controller import RobotController
 
 # --- 1. 使用统一的客户端 ---
 client = get_client()
-
-# 🔥 核心更换：改用 Coder 模型，它对 JSON 格式的执行力极强，极少犯错
-model_name = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # --- 2. 初始化控制器 ---
 if "controller" not in st.session_state:
@@ -154,7 +151,7 @@ if prompt := st.chat_input("💬 下达指令..."):
     with st.status("🧠 Agent 正在处理...", expanded=True) as status:
         try:
             response = client.chat.completions.create(
-                model=model_name, messages=st.session_state.cmd_messages, tools=tools, tool_choice="auto"
+                model=MODEL_NAME, messages=st.session_state.cmd_messages, tools=tools, tool_choice="auto", stream=True
             )
             response_message = response.choices[0].message
             content_text = response_message.content or ""

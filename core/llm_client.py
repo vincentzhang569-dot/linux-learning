@@ -8,9 +8,9 @@ from openai import OpenAI
 
 ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
-# 你在 app.py 里用到的视觉模型名，保持一致
+# 改成智谱的"闪电"模型，速度极快！
 
-SILICONFLOW_MODEL = "glm-4-flash"
+MODEL_NAME = "glm-4-flash"
 
 @st.cache_resource
 

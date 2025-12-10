@@ -1,7 +1,7 @@
 import streamlit as st
 import pdfplumber
 # 1. 导入你写好的那个带缓存的文件
-from core.llm_client import get_client, SILICONFLOW_MODEL
+from core.llm_client import get_client, MODEL_NAME
 
 from datetime import datetime
 from io import BytesIO
@@ -968,7 +968,7 @@ if prompt:
         
         with st.chat_message("assistant"):
             # 显示加载状态
-            model_display_name = SILICONFLOW_MODEL.split('/')[-1]
+            model_display_name = MODEL_NAME.split('/')[-1]
             spinner_text = f"🤔 {model_display_name} 正在分析中..."
             if has_image:
                 spinner_text = f"👁️ {model_display_name} 正在分析图片..."
@@ -1016,7 +1016,7 @@ if prompt:
                 
                 # 调用硅基流动 API（流式输出）
                 stream = client.chat.completions.create(
-                    model=SILICONFLOW_MODEL,
+                    model=MODEL_NAME,
                     messages=messages,
                     stream=True
                 )
