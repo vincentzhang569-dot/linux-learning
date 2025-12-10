@@ -151,7 +151,7 @@ if prompt := st.chat_input("💬 下达指令..."):
     with st.status("🧠 Agent 正在处理...", expanded=True) as status:
         try:
             response = client.chat.completions.create(
-                model=MODEL_NAME, messages=st.session_state.cmd_messages, tools=tools, tool_choice="auto", stream=True
+                model=MODEL_NAME, messages=st.session_state.cmd_messages, tools=tools, tool_choice="auto"
             )
             response_message = response.choices[0].message
             content_text = response_message.content or ""
