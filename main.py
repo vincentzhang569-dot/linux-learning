@@ -1,12 +1,15 @@
 import streamlit as st
 
-# --- 1. 页面配置 ---
+# --- 1. 页面配置 (移动端优化) ---
 st.set_page_config(
     page_title="工业智脑综合管理平台",
     page_icon="🏭",
-    layout="wide",
+    layout="wide",  # 设为 wide 可以更好利用屏幕边缘
     initial_sidebar_state="collapsed"
 )
+
+# --- 2. 移动端欢迎语 ---
+st.info("📱 Mobile Mode Active: 工业 4.0 中控台已就绪")
 
 # --- 2. 暴力 CSS 修复 (针对 Streamlit 内部结构) ---
 st.markdown("""
