@@ -270,15 +270,34 @@ if toggle_on:
 
     # 自动触发报警逻辑
     if current_temp > 100 and not st.session_state.has_alerted:
-        alert_msg = f"【自动警报】1号机组温度异常！当前值：{current_temp:.1f}°C，请立即处理！"
-        # 默认发给配置的发件人，若需要可改为其他收件人
+        # 1. 获取执行结果
         try:
-            to_email = st.secrets["email"]["SENDER_EMAIL"]
+            default_receiver = st.secrets["email"]["SENDER_EMAIL"]
         except Exception:
-            to_email = ""
-        send_email_action(to_email=to_email, subject="自动警报", content=alert_msg)
-        alert_placeholder.error("检测到异常！报警邮件已自动发送！")
-        st.session_state.has_alerted = True
+            default_receiver = "your_email@example.com"
+        result_str = send_email_action(
+            to_email=default_receiver,
+            subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
+            content=(
+                f"检测时间：{time.strftime('%H:%M:%S')}\n"
+                f"当前温度：{current_temp:.1f}°C\n"
+                "请立即检查！"
+            ),
+        )
+
+        # 2. 解析结果
+        try:
+            result = json.loads(result_str)
+        except Exception:
+            result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
+
+        # 3. 根据真实结果显示信息
+        if result.get("status") == "success":
+            alert_placeholder.error(f"🔥 检测到异常！{result.get('msg', '')}")
+            st.session_state.has_alerted = True
+        else:
+            alert_placeholder.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
+            # 发送失败时不锁定报警，下次循环继续尝试
     elif current_temp < 95:
         # 温度恢复，允许下次再次报警
         st.session_state.has_alerted = False
