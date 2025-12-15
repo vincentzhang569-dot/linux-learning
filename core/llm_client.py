@@ -20,7 +20,7 @@ def get_client() -> OpenAI:
 
     try:
 
-        api_key = st.secrets["ZHIPU_API_KEY"]
+        api_key = st.secrets["general"]["ZHIPU_API_KEY"]
 
     except Exception:
 

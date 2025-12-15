@@ -22,7 +22,7 @@ class ZhipuEmbedding(Embeddings):
     def __init__(self):
         # 从 secrets 获取 Key
         try:
-            api_key = st.secrets["ZHIPU_API_KEY"]
+            api_key = st.secrets["general"]["ZHIPU_API_KEY"]
             self.client = zhipuai.ZhipuAI(api_key=api_key)
         except Exception:
             st.error("⚠️ 未找到智谱 API Key，请检查 secrets.toml")
