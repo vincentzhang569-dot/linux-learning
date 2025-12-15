@@ -2,46 +2,46 @@
 核心工具集：邮件发送等通用动作
 """
 
+import json
 import smtplib
-import ssl
+from email.header import Header
 from email.mime.text import MIMEText
 
 import streamlit as st
 
 
-def send_email_action(content: str, subject: str = "自动警报", to_email: str | None = None) -> bool:
+def send_email_action(to_email: str, subject: str, content: str):
     """
-    发送邮件（基于 secrets.toml 的 email 配置）
-
-    Args:
-        content: 邮件正文
-        subject: 邮件标题
-        to_email: 收件人，不传则默认发给配置里的发件人
+    发送邮件的实际执行函数 (抗干扰版)
     """
     try:
-        email_conf = st.secrets["email"]
-        smtp_server = email_conf["SMTP_SERVER"]
-        smtp_port = int(email_conf.get("SMTP_PORT", 465))
-        sender_email = email_conf["SENDER_EMAIL"]
-        password = email_conf["EMAIL_PASSWORD"]
+        # 获取配置
+        email_config = st.secrets["email"]
+        smtp_server = email_config["SMTP_SERVER"]
+        smtp_port = email_config["SMTP_PORT"]
+        sender = email_config["SENDER_EMAIL"]
+        password = email_config["EMAIL_PASSWORD"]
+
+        # 构造邮件
+        message = MIMEText(content, "plain", "utf-8")
+        message["From"] = Header("工业智脑中控 <AI_Center>", "utf-8")
+        message["To"] = Header(to_email, "utf-8")
+        message["Subject"] = Header(subject, "utf-8")
+
+        # 发送
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+        server.login(sender, password)
+        server.sendmail(sender, [to_email], message.as_string())
+
+        # === 关键修复：优雅退出 ===
+        try:
+            server.quit()
+        except Exception:
+            # 如果邮件已发送但断开连接报错，忽略它，视为成功
+            pass
+
+        return json.dumps({"status": "success", "msg": f"已成功发送邮件至 {to_email}"})
+
     except Exception as e:
-        st.error(f"⚠️ 邮件配置缺失或错误: {e}")
-        return False
-
-    receiver = to_email or sender_email
-
-    msg = MIMEText(content, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = sender_email
-    msg["To"] = receiver
-
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
-            server.login(sender_email, password)
-            server.sendmail(sender_email, [receiver], msg.as_string())
-        return True
-    except Exception as e:
-        st.error(f"❌ 邮件发送失败: {e}")
-        return False
+        return json.dumps({"status": "error", "msg": f"邮件发送失败: {str(e)}"})
 

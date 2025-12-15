@@ -271,11 +271,12 @@ if toggle_on:
     # 自动触发报警逻辑
     if current_temp > 100 and not st.session_state.has_alerted:
         alert_msg = f"【自动警报】1号机组温度异常！当前值：{current_temp:.1f}°C，请立即处理！"
+        # 默认发给配置的发件人，若需要可改为其他收件人
         try:
-            send_email_action(alert_msg)
-        except TypeError:
-            # 兼容不同签名：尝试带 subject 形式
-            send_email_action(subject="自动警报", content=alert_msg)
+            to_email = st.secrets["email"]["SENDER_EMAIL"]
+        except Exception:
+            to_email = ""
+        send_email_action(to_email=to_email, subject="自动警报", content=alert_msg)
         alert_placeholder.error("检测到异常！报警邮件已自动发送！")
         st.session_state.has_alerted = True
     elif current_temp < 95:
