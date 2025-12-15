@@ -12,8 +12,8 @@ from robot_controller import RobotController
 client = get_client()
 if "controller" not in st.session_state:
     st.session_state.controller = RobotController(num_robots=5)
-if "has_alerted" not in st.session_state:
-    st.session_state.has_alerted = False
+if "last_alert_time" not in st.session_state:
+    st.session_state.last_alert_time = 0  # 记录上次报警时间戳（秒）
 controller = st.session_state.controller
 
 # --- 2. CSS 样式 ---
@@ -268,39 +268,44 @@ if toggle_on:
     else:
         temp_placeholder.metric("1号机组温度", f"{current_temp:.1f} °C")
 
-    # 自动触发报警逻辑
-    if current_temp > 100 and not st.session_state.has_alerted:
-        # 1. 获取执行结果
-        try:
-            default_receiver = st.secrets["email"]["SENDER_EMAIL"]
-        except Exception:
-            default_receiver = "your_email@example.com"
-        result_str = send_email_action(
-            to_email=default_receiver,
-            subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
-            content=(
-                f"检测时间：{time.strftime('%H:%M:%S')}\n"
-                f"当前温度：{current_temp:.1f}°C\n"
-                "请立即检查！"
-            ),
-        )
+    # 自动触发报警逻辑（带 5 分钟冷却）
+    if current_temp > 100:
+        now_ts = time.time()
+        elapsed = now_ts - st.session_state.last_alert_time
+        if elapsed > 300:
+            # 1. 获取执行结果
+            try:
+                default_receiver = st.secrets["email"]["SENDER_EMAIL"]
+            except Exception:
+                default_receiver = "your_email@example.com"
+            result_str = send_email_action(
+                to_email=default_receiver,
+                subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
+                content=(
+                    f"检测时间：{time.strftime('%H:%M:%S')}\n"
+                    f"当前温度：{current_temp:.1f}°C\n"
+                    "请立即检查！"
+                ),
+            )
 
-        # 2. 解析结果
-        try:
-            result = json.loads(result_str)
-        except Exception:
-            result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
+            # 2. 解析结果
+            try:
+                result = json.loads(result_str)
+            except Exception:
+                result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
 
-        # 3. 根据真实结果显示信息
-        if result.get("status") == "success":
-            alert_placeholder.error(f"🔥 检测到异常！{result.get('msg', '')}")
-            st.session_state.has_alerted = True
+            # 3. 根据真实结果显示信息
+            if result.get("status") == "success":
+                alert_placeholder.error(f"🔥 温度异常 ({current_temp:.1f}°C)！报警邮件已发送！")
+                st.session_state.last_alert_time = now_ts
+            else:
+                alert_placeholder.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
+                # 发送失败不更新冷却，便于下次重试
         else:
-            alert_placeholder.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
-            # 发送失败时不锁定报警，下次循环继续尝试
-    elif current_temp < 95:
-        # 温度恢复，允许下次再次报警
-        st.session_state.has_alerted = False
+            remaining = 300 - int(elapsed)
+            alert_placeholder.warning(
+                f"⚠️ 温度持续异常 ({current_temp:.1f}°C)... (报警冷却中，{remaining}秒后可再次触发)"
+            )
 
     # 模拟 2 秒刷新一次
     time.sleep(2)
