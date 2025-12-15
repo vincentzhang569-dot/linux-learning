@@ -15,28 +15,61 @@ with st.sidebar:
     st.header("📂 知识库挂载")
     st.caption("上传技术手册/维修文档，AI 将基于文档回答。")
     
+    # === 侧边栏：文档上传区 ===
     uploaded_file = st.file_uploader("上传 PDF 文档", type=["pdf"])
     
-    # 处理文件上传逻辑
+    # 处理文件上传
     if uploaded_file is not None:
+        # 定义最大页数限制 (保护 2G 内存服务器)
+        MAX_PAGES = 50 
+        
         try:
-            with pdfplumber.open(uploaded_file) as pdf:
-                # 提取所有页面的文本
-                all_text = ""
-                for page in pdf.pages:
-                    all_text += page.extract_text() + "\n"
+            # 检查是否已经处理过这个文件，防止重复计算
+            if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != uploaded_file.name:
                 
-                # 调用 RAG 构建向量存储
-                with st.spinner("正在构建知识库索引..."):
-                    result = build_vector_store(all_text)
-                    if result.startswith("✅"):
+                # 1. 进度条组件
+                progress_bar = st.progress(0, text="正在启动文档解析引擎...")
+                text = ""
+                
+                with pdfplumber.open(uploaded_file) as pdf:
+                    total_pages = len(pdf.pages)
+                    # 如果页数太多，强制截断
+                    process_pages = min(total_pages, MAX_PAGES)
+                    
+                    if total_pages > MAX_PAGES:
+                        st.warning(f"⚠️ 文档过大 ({total_pages}页)，为防止服务器崩溃，仅读取前 {MAX_PAGES} 页。")
+                    
+                    # 2. 逐页读取并更新进度条
+                    for i in range(process_pages):
+                        page_text = pdf.pages[i].extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                        
+                        # 更新进度 (0% - 50%)
+                        current_progress = int((i / process_pages) * 50)
+                        progress_bar.progress(current_progress, text=f"正在读取第 {i+1}/{process_pages} 页...")
+                
+                # 3. 构建向量库 (耗时操作)
+                if text:
+                    progress_bar.progress(60, text="正在切分文本并构建向量索引 (这需要一点时间)...")
+                    
+                    # 调用 core 里的函数
+                    result_msg = build_vector_store(text)
+                    
+                    # 完成
+                    progress_bar.progress(100, text="✅ 处理完成！")
+                    st.success(result_msg)
+                    
+                    # 记录状态
+                    if result_msg.startswith("✅"):
                         st.session_state.knowledge_base_ready = True
-                        st.success(result)
                     else:
                         st.session_state.knowledge_base_ready = False
-                        st.warning(result)
+                    st.session_state.doc_content = text # (可选：存原文以便查看，如果内存紧张可注释掉这行)
+                    st.session_state.last_uploaded = uploaded_file.name
+                
         except Exception as e:
-            st.error(f"❌ 解析失败: {e}")
+            st.error(f"文档读取失败: {e}")
             st.session_state.knowledge_base_ready = False
     else:
         # 如果用户移除文件，重置知识库状态
