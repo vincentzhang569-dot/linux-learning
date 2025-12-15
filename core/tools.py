@@ -12,7 +12,7 @@ import streamlit as st
 
 def send_email_action(to_email: str, subject: str, content: str):
     """
-    发送邮件的实际执行函数 (抗干扰版)
+    发送邮件的实际执行函数 (QQ邮箱修正版)
     """
     try:
         # 获取配置
@@ -24,8 +24,14 @@ def send_email_action(to_email: str, subject: str, content: str):
 
         # 构造邮件
         message = MIMEText(content, "plain", "utf-8")
-        message["From"] = Header("工业智脑中控 <AI_Center>", "utf-8")
-        message["To"] = Header(to_email, "utf-8")
+
+        # === 关键修改 ===
+        # 格式：工业智脑中控 <970859897@qq.com>
+        # 这样 QQ 才会认为你是合法用户
+        message["From"] = f"工业智脑中控 <{sender}>"
+        # =================
+
+        message["To"] = f"<{to_email}>"
         message["Subject"] = Header(subject, "utf-8")
 
         # 发送
@@ -33,11 +39,9 @@ def send_email_action(to_email: str, subject: str, content: str):
         server.login(sender, password)
         server.sendmail(sender, [to_email], message.as_string())
 
-        # === 关键修复：优雅退出 ===
         try:
             server.quit()
         except Exception:
-            # 如果邮件已发送但断开连接报错，忽略它，视为成功
             pass
 
         return json.dumps({"status": "success", "msg": f"已成功发送邮件至 {to_email}"})
