@@ -284,4 +284,4 @@ if toggle_on:
 
     # 模拟 2 秒刷新一次
     time.sleep(2)
-    st.experimental_rerun()
+    st.rerun()
