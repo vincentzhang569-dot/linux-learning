@@ -7,7 +7,7 @@ import streamlit as st
 from typing import List, Optional
 import os
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from chromadb.config import Settings
 
