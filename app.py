@@ -1,15 +1,16 @@
 import streamlit as st
 from core.llm_client import get_client
+from core.rag_bridge import build_vector_store, query_vector_store
 import pdfplumber  # 记得确保安装了这个库：pip install pdfplumber
 
 # --- 1. 核心变量初始化 ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "context_content" not in st.session_state:
-    st.session_state.context_content = ""  # 用于存储上传文档的内容
+if "knowledge_base_ready" not in st.session_state:
+    st.session_state.knowledge_base_ready = False  # 标记知识库是否已构建
 
-# --- 2. 侧边栏：文件上传功能 (RAG 简易版) ---
+# --- 2. 侧边栏：文件上传功能 (RAG 升级版) ---
 with st.sidebar:
     st.header("📂 知识库挂载")
     st.caption("上传技术手册/维修文档，AI 将基于文档回答。")
@@ -25,13 +26,21 @@ with st.sidebar:
                 for page in pdf.pages:
                     all_text += page.extract_text() + "\n"
                 
-                st.session_state.context_content = all_text
-                st.success(f"✅ 文档已加载！包含 {len(pdf.pages)} 页内容。")
+                # 调用 RAG 构建向量存储
+                with st.spinner("正在构建知识库索引..."):
+                    result = build_vector_store(all_text)
+                    if result.startswith("✅"):
+                        st.session_state.knowledge_base_ready = True
+                        st.success(result)
+                    else:
+                        st.session_state.knowledge_base_ready = False
+                        st.warning(result)
         except Exception as e:
             st.error(f"❌ 解析失败: {e}")
+            st.session_state.knowledge_base_ready = False
     else:
-        # 如果用户移除文件，清空上下文
-        st.session_state.context_content = ""
+        # 如果用户移除文件，重置知识库状态
+        st.session_state.knowledge_base_ready = False
 
     st.divider()
     
@@ -40,31 +49,11 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# --- 3. 定义动态 System Prompt ---
-# 如果有文档，就把文档塞进脑子里；如果没有，就只用基础人设
+# --- 3. 基础 System Prompt 模板 ---
 base_system_prompt = """
-你是一位严谨的工业维修专家。
-任务：根据用户的故障描述，直接输出维修排查清单。
-规则：Markdown 列表格式，禁止反问，禁止客套。
+你是一位工业维修专家。
+请基于以下【参考资料】回答用户问题。如果资料中没有答案，请使用你的专业知识补充，但要说明"资料中未提及"。
 """
-
-if st.session_state.context_content:
-    # RAG 模式：让 AI 基于文档回答
-    final_system_content = f"""
-    {base_system_prompt}
-    
-    【重要】：用户已上传技术参考文档，内容如下：
-    ---
-    {st.session_state.context_content[:50000]} 
-    ---
-    请优先依据上述文档内容进行故障分析。
-    """
-    # 注意：这里截取前5万字防止超长，GLM-4-Flash 支持长文本，一般够用
-else:
-    # 普通模式
-    final_system_content = base_system_prompt
-
-SYSTEM_PROMPT = {"role": "system", "content": final_system_content}
 
 
 # --- 4. 主界面布局 ---
@@ -78,7 +67,7 @@ for msg in st.session_state.messages:
 
 # --- 5. 处理聊天的函数 ---
 def handle_chat(user_input):
-    # 1. 既然上面已经显示了历史，这里只需要显示“新的一轮”
+    # 1. 既然上面已经显示了历史，这里只需要显示"新的一轮"
     # A. 显示用户输入
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -86,9 +75,28 @@ def handle_chat(user_input):
 
     # B. 显示 AI 回复
     with st.chat_message("assistant"):
+        # 2. RAG 查询：从向量库中检索相关上下文
+        context = ""
+        if st.session_state.knowledge_base_ready:
+            context = query_vector_store(user_input, k=3)
+        
+        # 3. 构建动态 System Prompt
+        if context:
+            final_system_content = f"""
+{base_system_prompt}
+
+【参考资料】：
+{context}
+"""
+        else:
+            final_system_content = base_system_prompt
+        
+        system_prompt = {"role": "system", "content": final_system_content}
+        
+        # 4. 调用 AI
         client = get_client()
         # 构造消息：系统设定 + 历史记录
-        api_messages = [SYSTEM_PROMPT] + st.session_state.messages
+        api_messages = [system_prompt] + st.session_state.messages
         
         response = client.chat.completions.create(
             model="glm-4-flash",
