@@ -258,54 +258,61 @@ st.markdown("### 📡 实时数据监控面板")
 toggle_on = st.toggle("启动实时数据流模拟", value=False)
 
 if toggle_on:
+    status_container = st.empty()
     current_temp = random.uniform(80, 120)
-    temp_placeholder = st.empty()
-    alert_placeholder = st.empty()
 
-    # 显示当前温度，>100 以红色强调
-    if current_temp > 100:
-        temp_placeholder.metric("1号机组温度", f"{current_temp:.1f} °C", delta="高温", delta_color="inverse")
-    else:
-        temp_placeholder.metric("1号机组温度", f"{current_temp:.1f} °C")
-
-    # 自动触发报警逻辑（带 5 分钟冷却）
-    if current_temp > 100:
-        now_ts = time.time()
-        elapsed = now_ts - st.session_state.last_alert_time
-        if elapsed > 300:
-            # 1. 获取执行结果
-            try:
-                default_receiver = st.secrets["email"]["SENDER_EMAIL"]
-            except Exception:
-                default_receiver = "your_email@example.com"
-            result_str = send_email_action(
-                to_email=default_receiver,
-                subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
-                content=(
-                    f"检测时间：{time.strftime('%H:%M:%S')}\n"
-                    f"当前温度：{current_temp:.1f}°C\n"
-                    "请立即检查！"
-                ),
+    with status_container.container():
+        # 显示当前温度，>100 以红色强调
+        if current_temp > 100:
+            st.metric(
+                "1号机组温度",
+                f"{current_temp:.1f} °C",
+                delta="高温",
+                delta_color="inverse",
             )
-
-            # 2. 解析结果
-            try:
-                result = json.loads(result_str)
-            except Exception:
-                result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
-
-            # 3. 根据真实结果显示信息
-            if result.get("status") == "success":
-                alert_placeholder.error(f"🔥 温度异常 ({current_temp:.1f}°C)！报警邮件已发送！")
-                st.session_state.last_alert_time = now_ts
-            else:
-                alert_placeholder.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
-                # 发送失败不更新冷却，便于下次重试
         else:
-            remaining = 300 - int(elapsed)
-            alert_placeholder.warning(
-                f"⚠️ 温度持续异常 ({current_temp:.1f}°C)... (报警冷却中，{remaining}秒后可再次触发)"
-            )
+            st.metric("1号机组温度", f"{current_temp:.1f} °C")
+
+        # 自动触发报警逻辑（带 5 分钟冷却）
+        if current_temp > 100:
+            now_ts = time.time()
+            elapsed = now_ts - st.session_state.last_alert_time
+            if elapsed > 300:
+                # 1. 获取执行结果
+                try:
+                    default_receiver = st.secrets["email"]["SENDER_EMAIL"]
+                except Exception:
+                    default_receiver = "your_email@example.com"
+                result_str = send_email_action(
+                    to_email=default_receiver,
+                    subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
+                    content=(
+                        f"检测时间：{time.strftime('%H:%M:%S')}\n"
+                        f"当前温度：{current_temp:.1f}°C\n"
+                        "请立即检查！"
+                    ),
+                )
+
+                # 2. 解析结果
+                try:
+                    result = json.loads(result_str)
+                except Exception:
+                    result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
+
+                # 3. 根据真实结果显示信息
+                if result.get("status") == "success":
+                    st.error(f"🔥 温度异常 ({current_temp:.1f}°C)！报警邮件已发送！")
+                    st.session_state.last_alert_time = now_ts
+                else:
+                    st.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
+                    # 发送失败不更新冷却，便于下次重试
+            else:
+                remaining = 300 - int(elapsed)
+                st.warning(
+                    f"⚠️ 温度持续异常 ({current_temp:.1f}°C)... (报警冷却中，{remaining}秒后可再次触发)"
+                )
+        else:
+            st.success("运行正常")
 
     # 模拟 2 秒刷新一次
     time.sleep(2)
