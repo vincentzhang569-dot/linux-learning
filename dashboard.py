@@ -22,8 +22,11 @@ st.markdown("""
     /* 顶部容器布局 */
     .css-18e3th9 { padding-top: 0rem; }
     
-    /* 图表容器高度固定 */
+    /* 强制图表容器高度固定，防止页面抖动 */
     .js-plotly-plot { height: 450px !important; }
+    
+    /* 消除图表周围的留白 */
+    .plotly .modebar { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,14 +97,14 @@ def create_chart(df, data_col, color_hex, y_range):
     fig = make_subplots(
         rows=5, cols=1, 
         shared_xaxes=True,
-        vertical_spacing=0.02,
+        vertical_spacing=0.03, # 增加一点间距
         subplot_titles=None
     )
     
     for i, robot in enumerate(ROBOTS):
         r_data = df[df['Robot_ID'] == robot]
         
-        # 线条
+        # 线条：只画这一条！不再加任何警戒线！
         fig.add_trace(go.Scatter(
             x=r_data['Timestamp'], 
             y=r_data[data_col],
@@ -120,11 +123,11 @@ def create_chart(df, data_col, color_hex, y_range):
             bgcolor="rgba(0,0,0,0.5)"
         )
         
-        # Y轴固定
+        # Y轴固定，去掉网格线，只留纯净的数据
         fig.update_yaxes(
             range=y_range, 
             row=i+1, col=1, 
-            showgrid=True, gridcolor='#222', 
+            showgrid=False, # 关掉网格，解决"四条线"视觉干扰
             zeroline=False,
             tickfont=dict(color='#666', size=10)
         )
@@ -144,31 +147,13 @@ def create_chart(df, data_col, color_hex, y_range):
 
 # ==================== 5. 主循环 ====================
 
-# 预先定义 HTML 模板，防止缩进导致的渲染错误
-# 这里的 CSS 直接写在 style 标签里，避免外部干扰
-card_style = """
-<style>
-.monitor-container { display: flex; gap: 8px; width: 100%; }
-.monitor-card { 
-    background: #111; 
-    border: 1px solid #333; 
-    border-radius: 4px; 
-    flex: 1; 
-    padding: 10px; 
-    text-align: center; 
-}
-.st-run { border-top: 3px solid #00BFFF; }
-.st-warn { border-top: 3px solid #FFA500; }
-.st-err { border-top: 3px solid #FF0000; }
-.m-title { color: #fff; font-weight: bold; font-size: 14px; margin-bottom: 4px; }
-.m-val { color: #aaa; font-family: monospace; font-size: 12px; }
-</style>
-"""
+# 预先定义 HTML 模板，这次压缩成单行，绝对不会显示出白色代码框
+card_style = """<style>.monitor-container{display:flex;gap:8px;width:100%;}.monitor-card{background:#111;border:1px solid #333;border-radius:4px;flex:1;padding:10px;text-align:center;}.st-run{border-top:3px solid #00BFFF;}.st-warn{border-top:3px solid #FFA500;}.st-err{border-top:3px solid #FF0000;}.m-title{color:#fff;font-weight:bold;font-size:14px;margin-bottom:4px;}.m-val{color:#aaa;font-family:monospace;font-size:12px;}</style>"""
 
 while True:
     # 1. 更新数据
     new_frame = simulate_data(st.session_state.data_buffer)
-    st.session_state.data_buffer = pd.concat([st.session_state.data_buffer, new_frame], ignore_index=True).tail(100)
+    st.session_state.data_buffer = pd.concat([st.session_state.data_buffer, new_frame], ignore_index=True).tail(50) # 只保留最近50个点，让线条跑得快一点
     df = st.session_state.data_buffer
     
     # 2. 生成顶部卡片 HTML (单行压缩，避免缩进错误)
