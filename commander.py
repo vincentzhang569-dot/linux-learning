@@ -259,10 +259,29 @@ toggle_on = st.toggle("启动实时数据流模拟", value=False)
 
 if toggle_on:
     status_container = st.empty()
-    current_temp = random.uniform(80, 120)
+    
+    # === 修改处：数据模拟逻辑优化 ===
+    # 1. 初始化模拟温度 (如果不存在)
+    if "monitor_temp" not in st.session_state:
+        st.session_state.monitor_temp = 65.0  # 初始设为 65°C 左右的正常值
+
+    # 2. 模拟真实波动 (Random Walk)
+    # 每次只在当前基础上微调，而不是生成全新的随机数，这样曲线更平滑真实
+    delta = random.uniform(-1.5, 1.5)
+    st.session_state.monitor_temp += delta
+    
+    # 3. 强制约束范围 (55°C - 75°C)
+    # 确保它永远运行在“正常”区域，绝对不会达到 100°C 触发报警
+    if st.session_state.monitor_temp > 75.0:
+        st.session_state.monitor_temp = 75.0
+    elif st.session_state.monitor_temp < 55.0:
+        st.session_state.monitor_temp = 55.0
+        
+    current_temp = st.session_state.monitor_temp
+    # ===============================
 
     with status_container.container():
-        # 显示当前温度，>100 以红色强调
+        # 显示当前温度，>100 以红色强调 (虽然逻辑上现在不会超过100了)
         if current_temp > 100:
             st.metric(
                 "1号机组温度",
@@ -274,6 +293,7 @@ if toggle_on:
             st.metric("1号机组温度", f"{current_temp:.1f} °C")
 
         # 自动触发报警逻辑（带 5 分钟冷却）
+        # 注：因为上面限制了 current_temp < 75，这里的 > 100 永远不会触发，系统将一直保持“运行正常”
         if current_temp > 100:
             now_ts = time.time()
             elapsed = now_ts - st.session_state.last_alert_time
