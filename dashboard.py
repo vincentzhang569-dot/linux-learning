@@ -6,9 +6,9 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 
-# 页面配置
+# ==================== 页面配置修改 ====================
 st.set_page_config(
-    page_title="工业物联网实时监控大屏",
+    page_title="工业智脑综合管理平台", # 1. 修改了网页标题
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -23,17 +23,24 @@ def init_simulation_data():
     now = datetime.now()
     data = []
     
-    for robot in ROBOTS:
-        # 为每个机器人设置不同的初始状态
-        base_temp = np.random.uniform(40, 60)
-        base_vib = np.random.uniform(0.2, 0.8)
+    for idx, robot in enumerate(ROBOTS):
+        # 2. 修改初始状态逻辑：差异化配置
+        # 前3台 (A, B, C) 状态非常好，模拟正常生产
+        if idx < 3:
+            base_temp = np.random.uniform(45, 55)
+            base_vib = np.random.uniform(0.2, 0.4)
+        # 后2台 (D, E) 稍微有点热，模拟可能出现的问题，但不会全是故障
+        else:
+            base_temp = np.random.uniform(65, 75) 
+            base_vib = np.random.uniform(0.5, 1.5)
+
         base_load = np.random.uniform(5, 8)
         
         for i in range(100): # 生成过去100个时间点
             timestamp = now - timedelta(seconds=(100-i)*2)
             
             # 添加一些随机波动
-            temp = base_temp + np.random.normal(0, 1.5)
+            temp = base_temp + np.random.normal(0, 1.0) # 减小了这里的波动方差，让曲线更平滑
             vib = base_vib + np.random.normal(0, 0.1)
             load = base_load + np.random.normal(0, 0.2) + np.sin(i/10)*2
             
@@ -65,29 +72,36 @@ def generate_next_step(current_df):
     
     for robot in ROBOTS:
         last_row = latest_readings.loc[robot]
+        current_temp = last_row['Motor_Temperature']
+        current_vib = last_row['Vibration_Level']
         
-        # === 模拟物理变化 ===
-        # 1. 温度：有惯性的随机游走
-        change = np.random.normal(0, 0.3) 
-        # 如果温度太高，模拟散热系统启动（强制降温趋势）
-        if last_row['Motor_Temperature'] > 85:
-            change -= 0.5
-        new_temp = last_row['Motor_Temperature'] + change
+        # === 3. 修改模拟物理变化：增强自愈逻辑 ===
+        # 温度变化
+        change = np.random.normal(0, 0.4) 
         
-        # 2. 振动：偶尔出现尖峰（故障模拟）
-        # 1% 的概率出现震动突增
-        if np.random.random() < 0.01:
-            new_vib = last_row['Vibration_Level'] + np.random.uniform(2, 4)
-        else:
-            # 正常的阻尼回复
-            new_vib = last_row['Vibration_Level'] * 0.95 + np.random.normal(0.2, 0.05)
+        # 关键修改：如果温度处于 Warning 或 Error 状态，模拟散热系统强力介入
+        if current_temp > 82:
+            change -= 1.2 # 强力降温，让它能回到 Warning
+        elif current_temp > 72:
+            change -= 0.6 # 温和降温，试图回到 Running
+        elif current_temp < 40:
+            change += 0.5 # 机器预热
             
-        # 3. 负载：周期性正弦波 + 噪声
-        # 利用时间戳的秒数制造周期
+        new_temp = current_temp + change
+        
+        # 振动变化：尖峰后迅速回落
+        if current_vib > 4:
+            new_vib = current_vib * 0.8 # 阻尼回落
+        elif np.random.random() < 0.01:
+            new_vib = current_vib + np.random.uniform(2, 3) # 偶尔的震动突增
+        else:
+            new_vib = current_vib * 0.95 + np.random.normal(0.2, 0.05)
+            
+        # 负载模拟 (保持不变)
         seconds = new_timestamp.timestamp()
         new_load = 6 + 3 * np.sin(seconds / 20) + np.random.normal(0, 0.1)
         
-        # === 状态判定逻辑 ===
+        # === 状态判定逻辑 (保持不变，但因为数据变了，状态会自动流转) ===
         status = 'Running'
         if new_temp > 80 or new_vib > 5:
             status = 'Error'
@@ -130,11 +144,11 @@ if auto_refresh:
 # 获取当前用于渲染的数据
 df = st.session_state.sensor_data
 
-# ==================== 3. 界面渲染 (保留你原本优秀的 CSS) ====================
+# ==================== 3. 界面渲染 ====================
 
 st.markdown("""
 <style>
-    /* 你的 CSS 样式保持不变，我省略了重复部分以节省空间，直接用你原来的即可 */
+    /* 你的 CSS 样式保持不变 */
     .main { background-color: #0e1117; }
     .stApp { background-color: #0e1117; }
     h1, h2, h3 { color: #ffffff; font-family: 'Arial', sans-serif; }
@@ -151,10 +165,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 标题栏
+# 标题栏 (修改了这里的标题)
 col_title, col_time = st.columns([3, 1])
 with col_title:
-    st.markdown("## 🏭 工业物联网预测性维护大屏 (Live Demo)")
+    st.markdown("## 🏭 工业智脑综合管理平台 (Live Monitor)")
 with col_time:
     # 显示实时时钟
     st.markdown(f"<h3 style='text-align: right; color: #00d4ff;'>{datetime.now().strftime('%H:%M:%S')}</h3>", unsafe_allow_html=True)
@@ -266,4 +280,4 @@ with col_alert:
 
 if auto_refresh:
     time.sleep(refresh_rate)
-    st.rerun() # 关键！这一行让整个脚本重新运行，形成动画帧
+    st.rerun()
