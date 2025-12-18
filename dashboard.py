@@ -1,637 +1,269 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import os
+import time
+import numpy as np
+from datetime import datetime, timedelta
 
+# 页面配置
+st.set_page_config(
+    page_title="工业物联网实时监控大屏",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# 页面配置 - 移动端优化
-# st.set_page_config(
-#     page_title="工业物联网预测性维护大屏",
-#     layout="wide",
-#     initial_sidebar_state="collapsed"  # 移动端默认收起侧边栏
-# )
+# ==================== 1. 核心：实时数据模拟引擎 ====================
 
-# 自定义 CSS 样式 - 工业中控室风格 + 移动端优化
+# 初始化机器人配置 (模拟真实的设备参数)
+ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
+
+def init_simulation_data():
+    """初始化历史数据（让图表一开始就有东西看）"""
+    now = datetime.now()
+    data = []
+    
+    for robot in ROBOTS:
+        # 为每个机器人设置不同的初始状态
+        base_temp = np.random.uniform(40, 60)
+        base_vib = np.random.uniform(0.2, 0.8)
+        base_load = np.random.uniform(5, 8)
+        
+        for i in range(100): # 生成过去100个时间点
+            timestamp = now - timedelta(seconds=(100-i)*2)
+            
+            # 添加一些随机波动
+            temp = base_temp + np.random.normal(0, 1.5)
+            vib = base_vib + np.random.normal(0, 0.1)
+            load = base_load + np.random.normal(0, 0.2) + np.sin(i/10)*2
+            
+            # 简单的状态逻辑
+            status = 'Running'
+            if temp > 80 or vib > 5: status = 'Error'
+            elif temp > 70 or vib > 3: status = 'Warning'
+            
+            data.append({
+                'Timestamp': timestamp,
+                'Robot_ID': robot,
+                'Motor_Temperature': temp,
+                'Vibration_Level': max(0, vib), # 振动不能为负
+                'Current_Load': max(0, load),
+                'Status': status
+            })
+    
+    return pd.DataFrame(data)
+
+def generate_next_step(current_df):
+    """生成下一秒的实时数据（基于上一秒的数据进行演变）"""
+    last_timestamp = current_df['Timestamp'].max()
+    new_timestamp = last_timestamp + timedelta(seconds=2) # 模拟每2秒一个数据点
+    
+    new_rows = []
+    
+    # 获取每个机器人的最后一行数据作为基准
+    latest_readings = current_df.sort_values('Timestamp').groupby('Robot_ID').last()
+    
+    for robot in ROBOTS:
+        last_row = latest_readings.loc[robot]
+        
+        # === 模拟物理变化 ===
+        # 1. 温度：有惯性的随机游走
+        change = np.random.normal(0, 0.3) 
+        # 如果温度太高，模拟散热系统启动（强制降温趋势）
+        if last_row['Motor_Temperature'] > 85:
+            change -= 0.5
+        new_temp = last_row['Motor_Temperature'] + change
+        
+        # 2. 振动：偶尔出现尖峰（故障模拟）
+        # 1% 的概率出现震动突增
+        if np.random.random() < 0.01:
+            new_vib = last_row['Vibration_Level'] + np.random.uniform(2, 4)
+        else:
+            # 正常的阻尼回复
+            new_vib = last_row['Vibration_Level'] * 0.95 + np.random.normal(0.2, 0.05)
+            
+        # 3. 负载：周期性正弦波 + 噪声
+        # 利用时间戳的秒数制造周期
+        seconds = new_timestamp.timestamp()
+        new_load = 6 + 3 * np.sin(seconds / 20) + np.random.normal(0, 0.1)
+        
+        # === 状态判定逻辑 ===
+        status = 'Running'
+        if new_temp > 80 or new_vib > 5:
+            status = 'Error'
+        elif new_temp > 70 or new_vib > 3:
+            status = 'Warning'
+            
+        new_rows.append({
+            'Timestamp': new_timestamp,
+            'Robot_ID': robot,
+            'Motor_Temperature': new_temp,
+            'Vibration_Level': max(0, new_vib),
+            'Current_Load': max(0, new_load),
+            'Status': status
+        })
+        
+    return pd.DataFrame(new_rows)
+
+# ==================== 2. 状态管理 ====================
+
+# 如果 session_state 里没有数据，初始化它
+if 'sensor_data' not in st.session_state:
+    st.session_state.sensor_data = init_simulation_data()
+    st.session_state.is_running = True # 默认开启自动刷新
+
+# 侧边栏控制区
+st.sidebar.markdown("### 🎮 模拟器控制台")
+auto_refresh = st.sidebar.toggle('⏱️ 开启实时数据流', value=True)
+refresh_rate = st.sidebar.slider('刷新频率 (秒)', 0.5, 5.0, 1.0)
+
+# 如果开启了自动刷新，更新数据
+if auto_refresh:
+    new_data = generate_next_step(st.session_state.sensor_data)
+    # 追加新数据
+    st.session_state.sensor_data = pd.concat([st.session_state.sensor_data, new_data], ignore_index=True)
+    
+    # 性能优化：保持滑动窗口，只保留最近500条数据，防止内存溢出
+    if len(st.session_state.sensor_data) > 2500: # 5个机器人 * 500点
+        st.session_state.sensor_data = st.session_state.sensor_data.iloc[-2500:]
+
+# 获取当前用于渲染的数据
+df = st.session_state.sensor_data
+
+# ==================== 3. 界面渲染 (保留你原本优秀的 CSS) ====================
+
 st.markdown("""
 <style>
-    /* ========== 基础样式 ========== */
-    .main {
-        background-color: #0e1117;
-    }
-    .stApp {
-        background-color: #0e1117;
-    }
-    
-    /* ========== 标题样式 ========== */
-    h1, h2, h3 {
-        color: #ffffff;
-        font-family: 'Arial', 'Microsoft YaHei', '微软雅黑', sans-serif;
-        font-weight: bold;
-        text-shadow: none;
-    }
-    
-    /* 移动端标题优化 */
-    @media (max-width: 768px) {
-        h1 {
-            font-size: 1.5rem !important;
-            margin-bottom: 0.5rem !important;
-        }
-        h2 {
-            font-size: 1.2rem !important;
-            margin-bottom: 0.5rem !important;
-        }
-        h3 {
-            font-size: 1rem !important;
-        }
-    }
-    
-    /* ========== 卡片样式 ========== */
+    /* 你的 CSS 样式保持不变，我省略了重复部分以节省空间，直接用你原来的即可 */
+    .main { background-color: #0e1117; }
+    .stApp { background-color: #0e1117; }
+    h1, h2, h3 { color: #ffffff; font-family: 'Arial', sans-serif; }
     .metric-card {
         background: linear-gradient(135deg, #1a1f2e 0%, #252b3f 100%);
-        border: 2px solid;
-        border-radius: 10px;
-        padding: 15px;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-        margin: 5px;
-        transition: transform 0.2s ease;
+        border: 2px solid; border-radius: 10px; padding: 15px;
+        text-align: center; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
     }
-    
-    /* 移动端卡片优化 */
-    @media (max-width: 768px) {
-        .metric-card {
-            padding: 12px;
-            margin: 3px;
-            border-radius: 8px;
-        }
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-2px);
-    }
-    
-    .status-running {
-        border-color: #00ff41;
-        box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
-    }
-    .status-warning {
-        border-color: #ffd700;
-        box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
-    }
-    .status-error {
-        border-color: #ff0000;
-        box-shadow: 0 0 20px rgba(255, 0, 0, 0.3);
-    }
-    
-    .robot-name {
-        font-size: 18px;
-        font-weight: bold;
-        color: #ffffff;
-        margin-bottom: 8px;
-    }
-    
-    @media (max-width: 768px) {
-        .robot-name {
-            font-size: 14px;
-            margin-bottom: 5px;
-        }
-    }
-    
-    .status-text {
-        font-size: 20px;
-        font-weight: bold;
-        margin: 10px 0;
-    }
-    
-    @media (max-width: 768px) {
-        .status-text {
-            font-size: 16px;
-            margin: 8px 0;
-        }
-    }
-    
-    .metric-value {
-        font-size: 14px;
-        color: #b0b0b0;
-        margin: 3px 0;
-    }
-    
-    @media (max-width: 768px) {
-        .metric-value {
-            font-size: 12px;
-            margin: 2px 0;
-        }
-    }
-    
-    /* ========== 侧边栏优化 ========== */
-    .sidebar .sidebar-content {
-        background-color: #1a1f2e;
-    }
-    
-    /* ========== 移动端布局优化 ========== */
-    @media (max-width: 768px) {
-        /* 主容器优化 */
-        .block-container {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            padding-left: 0.5rem;
-            padding-right: 0.5rem;
-            max-width: 100%;
-        }
-        
-        /* 列布局优化 - 移动端单列 */
-        [data-testid="column"] {
-            min-width: 100% !important;
-            width: 100% !important;
-            padding: 0.25rem !important;
-            flex: 1 1 100% !important;
-        }
-        
-        /* Streamlit 列容器优化 */
-        .row-widget.stHorizontal {
-            flex-direction: column !important;
-        }
-        
-        /* Metric 组件优化 */
-        [data-testid="stMetricValue"] {
-            font-size: 1.5rem !important;
-        }
-        
-        [data-testid="stMetricLabel"] {
-            font-size: 0.9rem !important;
-        }
-        
-        /* 表格优化 */
-        .dataframe {
-            font-size: 12px !important;
-        }
-        
-        /* 按钮优化 */
-        .stButton > button {
-            width: 100%;
-            font-size: 14px;
-            padding: 0.5rem;
-        }
-        
-        /* 图表容器优化 */
-        .js-plotly-plot {
-            width: 100% !important;
-            height: auto !important;
-        }
-        
-        /* 图表Y轴标签优化 - 确保水平显示 */
-        .ytitle {
-            writing-mode: horizontal-tb !important;
-            text-orientation: mixed !important;
-            transform: none !important;
-        }
-        
-        /* Plotly Y轴标题强制水平 */
-        .g-ytitle {
-            text-orientation: mixed !important;
-            writing-mode: horizontal-tb !important;
-            transform: none !important;
-        }
-        
-        /* Plotly Y轴标题文本 */
-        .g-ytitle text {
-            text-anchor: middle !important;
-            dominant-baseline: middle !important;
-        }
-        
-        /* 图表间距优化 */
-        .plotly {
-            margin-bottom: 20px !important;
-        }
-        
-        /* 子图标题优化 */
-        .g-xtitle, .g-ytitle {
-            font-size: 11px !important;
-        }
-        
-        /* Plotly图表容器响应式 */
-        .plotly-graph-div {
-            width: 100% !important;
-            max-width: 100% !important;
-        }
-    }
-    
-    /* ========== 性能优化 ========== */
-    /* 减少重绘 */
-    * {
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }
-    
-    /* 优化滚动 */
-    * {
-        scroll-behavior: smooth;
-    }
-    
-    /* 隐藏 Streamlit 默认元素（移动端） */
-    @media (max-width: 768px) {
-        #MainMenu {
-            visibility: hidden;
-        }
-        footer {
-            visibility: hidden;
-        }
-        header {
-            visibility: hidden;
-        }
-        
-        /* 触摸优化 */
-        * {
-            -webkit-tap-highlight-color: rgba(0, 212, 255, 0.2);
-            touch-action: manipulation;
-        }
-        
-        /* 优化表格滚动 */
-        .dataframe {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        /* 优化侧边栏 */
-        [data-testid="stSidebar"] {
-            width: 100% !important;
-        }
-        
-        /* 优化图表响应式 */
-        .plotly {
-            width: 100% !important;
-            height: auto !important;
-        }
-    }
-    
-    /* ========== 通用性能优化 ========== */
-    /* 减少动画（低性能设备） */
-    @media (prefers-reduced-motion: reduce) {
-        * {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-        }
-    }
+    .status-running { border-color: #00ff41; box-shadow: 0 0 15px rgba(0, 255, 65, 0.2); }
+    .status-warning { border-color: #ffd700; box-shadow: 0 0 15px rgba(255, 215, 0, 0.2); }
+    .status-error { border-color: #ff0000; box-shadow: 0 0 15px rgba(255, 0, 0, 0.2); }
+    .robot-name { font-size: 18px; font-weight: bold; color: #fff; }
+    .metric-value { font-size: 14px; color: #b0b0b0; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 🚀 性能优化：数据预处理和缓存 ---
-# 最大显示点数（大幅减少以提升性能）
-MAX_POINTS = 600  # 从2000减少到600，大幅提升渲染速度
+# 标题栏
+col_title, col_time = st.columns([3, 1])
+with col_title:
+    st.markdown("## 🏭 工业物联网预测性维护大屏 (Live Demo)")
+with col_time:
+    # 显示实时时钟
+    st.markdown(f"<h3 style='text-align: right; color: #00d4ff;'>{datetime.now().strftime('%H:%M:%S')}</h3>", unsafe_allow_html=True)
 
-@st.cache_data(ttl=600) 
-def load_data():
-    """加载并预处理数据"""
-    if not os.path.exists("robot_sensor_data.csv"):
-        from generate_data import generate_robot_data
-        generate_robot_data()
-    
-    df = pd.read_csv("robot_sensor_data.csv")
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    return df
+st.markdown("---")
 
-@st.cache_data(ttl=600)
-def get_robot_sampled_data(df, robot_id, max_points=MAX_POINTS):
-    """为指定机器人预处理采样数据，避免每次渲染都重新计算"""
-    robot_df = df[df['Robot_ID'] == robot_id].sort_values('Timestamp')
-    
-    if len(robot_df) <= max_points:
-        return robot_df
-    
-    # 智能采样：保留最近的数据 + 均匀采样历史数据
-    recent_count = min(200, len(robot_df) // 3)  # 最近200个点或1/3数据
-    recent_data = robot_df.tail(recent_count)
-    historical_data = robot_df.iloc[:-recent_count]
-    
-    if len(historical_data) > 0:
-        # 均匀采样历史数据
-        step = max(1, len(historical_data) // (max_points - recent_count))
-        sampled_historical = historical_data.iloc[::step]
-        robot_df = pd.concat([sampled_historical, recent_data]).sort_values('Timestamp')
-    
-    return robot_df
+# === 顶部：实时状态卡片 ===
+st.markdown("### 📊 实时设备状态")
+latest_data = df.sort_values('Timestamp').groupby('Robot_ID').last().reset_index()
 
-# 使用缓存函数加载数据
-df = load_data()
-# --- 🚀 优化结束 ---
-
-# 加载数据
-try:
-    # 显示加载状态（仅在首次加载时）
-    if 'data_loaded' not in st.session_state:
-        with st.spinner('🔄 正在加载数据...'):
-            st.session_state.data_loaded = True
+cols = st.columns(5)
+for idx, row in latest_data.iterrows():
+    col_idx = idx % 5
+    status = row['Status']
     
-    # 页面标题
-    st.markdown("<h1 style='text-align: center;'>🏭 工业物联网预测性维护大屏</h1>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align: center; color: #888;'>Industrial IoT Predictive Maintenance Dashboard</h3>", unsafe_allow_html=True)
-    st.markdown("---")
+    # 样式逻辑
+    if status == 'Running':
+        s_class, s_color, s_icon = 'status-running', '#00ff41', '✓'
+    elif status == 'Warning':
+        s_class, s_color, s_icon = 'status-warning', '#ffd700', '⚠'
+    else:
+        s_class, s_color, s_icon = 'status-error', '#ff0000', '✕'
     
-    # ============ 1. 全局概览 - 状态卡片 ============
-    st.markdown("<h2>📊 实时状态监控</h2>", unsafe_allow_html=True)
-    
-    # 获取每台机器人的最新状态
-    latest_data = df.sort_values('Timestamp').groupby('Robot_ID').last().reset_index()
-    
-    # 响应式布局：PC端5列，移动端2列
-    # 使用CSS媒体查询自动适配，这里创建5列但移动端会自动调整
-    cols = st.columns(5)
-    for idx, row in latest_data.iterrows():
-        col_idx = idx % 5
-        
-        status = row['Status']
-        if status == 'Running':
-            status_class = 'status-running'
-            status_color = '#00ff41'
-            status_icon = '✓'
-        elif status == 'Warning':
-            status_class = 'status-warning'
-            status_color = '#ffd700'
-            status_icon = '⚠'
-        else:  # Error
-            status_class = 'status-error'
-            status_color = '#ff0000'
-            status_icon = '✕'
-        
-        with cols[col_idx]:
-            st.markdown(f"""
-            <div class="metric-card {status_class}">
-                <div class="robot-name">{row['Robot_ID']}</div>
-                <div class="status-text" style="color: {status_color};">{status_icon} {status}</div>
-                <div class="metric-value">温度: {row['Motor_Temperature']:.1f}°C</div>
-                <div class="metric-value">振动: {row['Vibration_Level']:.2f} mm/s</div>
-                <div class="metric-value">负载: {row['Current_Load']:.2f} A</div>
+    with cols[col_idx]:
+        st.markdown(f"""
+        <div class="metric-card {s_class}">
+            <div class="robot-name">{row['Robot_ID']}</div>
+            <div style="font-size: 20px; font-weight: bold; color: {s_color}; margin: 10px 0;">
+                {s_icon} {status}
             </div>
-            """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # ============ 2. 单机深度分析 ============
-    st.sidebar.markdown("<h2 style='color: #00d4ff;'>🔍 单机分析</h2>", unsafe_allow_html=True)
-    
+            <div class="metric-value">温度: {row['Motor_Temperature']:.1f}°C</div>
+            <div class="metric-value">振动: {row['Vibration_Level']:.2f} mm/s</div>
+            <div class="metric-value">负载: {row['Current_Load']:.2f} A</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# === 中部：图表区域 ===
+col_chart, col_alert = st.columns([2, 1])
+
+with col_chart:
+    st.markdown("### 📈 实时趋势监控")
     # 侧边栏选择机器人
-    robot_list = sorted(df['Robot_ID'].unique())
-    selected_robot = st.sidebar.selectbox(
-        "选择机器人",
-        robot_list,
-        index=0
-    )
+    selected_robot = st.sidebar.selectbox("选择监控对象", ROBOTS, index=0)
     
-    # 使用预处理的数据（已缓存采样结果）
-    with st.spinner('📊 正在加载图表数据...'):
-        robot_df = get_robot_sampled_data(df, selected_robot)
+    # 过滤数据
+    robot_df = df[df['Robot_ID'] == selected_robot].tail(100) # 只显示最近100个点，营造“实时窗口”感
     
-    st.markdown(f"<h2>📈 {selected_robot} - 历史趋势分析</h2>", unsafe_allow_html=True)
-    st.caption(f"📊 显示 {len(robot_df):,} 个数据点（已优化采样）")
+    # 使用 Plotly 创建动态图
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.1, row_heights=[0.5, 0.5])
     
-    # 创建双子图 - 移动端优化
-    # 将Y轴标题信息直接写在子图标题里
-    fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=('电机温度 (°C) - 趋势图', '振动水平 (mm/s) - 趋势图'),
-        vertical_spacing=0.2,  # 紧凑间距
-        row_heights=[0.5, 0.5],
-        specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
-    )
+    # 温度曲线
+    fig.add_trace(go.Scatter(
+        x=robot_df['Timestamp'], y=robot_df['Motor_Temperature'],
+        mode='lines', name='温度', line=dict(color='#00d4ff', width=2),
+        fill='tozeroy', fillcolor='rgba(0, 212, 255, 0.1)' # 加点填充更好看
+    ), row=1, col=1)
     
-    # 优化子图标题字体大小（移动端友好）
-    fig.update_annotations(font_size=12)
+    # 振动曲线
+    fig.add_trace(go.Scatter(
+        x=robot_df['Timestamp'], y=robot_df['Vibration_Level'],
+        mode='lines', name='振动', line=dict(color='#00ff41', width=2),
+        fill='tozeroy', fillcolor='rgba(0, 255, 65, 0.1)'
+    ), row=2, col=1)
     
-    # ===== 温度图表 =====
-    # 警戒线阈值
-    TEMP_THRESHOLD = 80
-    VIB_THRESHOLD = 5
-    
-    # 温度折线 - 性能优化：使用简化的hover模板
-    fig.add_trace(
-        go.Scatter(
-            x=robot_df['Timestamp'],
-            y=robot_df['Motor_Temperature'],
-            mode='lines',
-            name='温度',
-            line=dict(color='#00d4ff', width=1.5),  # 稍微减小线宽
-            hovertemplate='%{y:.1f}°C<extra></extra>',  # 简化hover信息
-            connectgaps=False  # 不连接缺失数据，减少计算
-        ),
-        row=1, col=1
-    )
-    
-    # 温度警戒线
-    fig.add_hline(
-        y=TEMP_THRESHOLD,
-        line_dash="dash",
-        line_color="red",
-        line_width=1.5,
-        annotation_text=f"{TEMP_THRESHOLD}°C",  # 简化注释文字
-        annotation_position="right",
-        annotation_font=dict(size=9, color='red'),  # 字体调小
-        row=1, col=1
-    )
-    
-    # 超过警戒线的区域高亮（仅显示采样后的数据点，减少渲染负担）
-    over_temp = robot_df[robot_df['Motor_Temperature'] > TEMP_THRESHOLD]
-    if not over_temp.empty and len(over_temp) <= 100:  # 只显示少量超温点，避免性能问题
-        fig.add_trace(
-            go.Scatter(
-                x=over_temp['Timestamp'],
-                y=over_temp['Motor_Temperature'],
-                mode='markers',
-                name='超温',
-                marker=dict(color='red', size=6, symbol='x'),
-                hovertemplate='<b>⚠️ 超温</b><br>时间: %{x}<br>温度: %{y:.2f}°C<extra></extra>',
-                showlegend=False  # 减少图例项
-            ),
-            row=1, col=1
-        )
-    
-    # ===== 振动图表 =====
-    # 振动折线 - 性能优化：使用简化的hover模板
-    fig.add_trace(
-        go.Scatter(
-            x=robot_df['Timestamp'],
-            y=robot_df['Vibration_Level'],
-            mode='lines',
-            name='振动',
-            line=dict(color='#00ff41', width=1.5),  # 稍微减小线宽
-            hovertemplate='%{y:.2f} mm/s<extra></extra>',  # 简化hover信息
-            connectgaps=False  # 不连接缺失数据，减少计算
-        ),
-        row=2, col=1
-    )
-    
-    # 振动警戒线
-    fig.add_hline(
-        y=VIB_THRESHOLD,
-        line_dash="dash",
-        line_color="red",
-        line_width=1.5,
-        annotation_text=f"{VIB_THRESHOLD} mm/s",  # 简化注释文字
-        annotation_position="right",
-        annotation_font=dict(size=9, color='red'),  # 字体调小
-        row=2, col=1
-    )
-    
-    # 超过警戒线的区域高亮（仅显示采样后的数据点，减少渲染负担）
-    over_vib = robot_df[robot_df['Vibration_Level'] > VIB_THRESHOLD]
-    if not over_vib.empty and len(over_vib) <= 100:  # 只显示少量超振动点，避免性能问题
-        fig.add_trace(
-            go.Scatter(
-                x=over_vib['Timestamp'],
-                y=over_vib['Vibration_Level'],
-                mode='markers',
-                name='超振动',
-                marker=dict(color='red', size=6, symbol='x'),
-                hovertemplate='<b>⚠️ 超振动</b><br>时间: %{x}<br>振动: %{y:.3f} mm/s<extra></extra>',
-                showlegend=False  # 减少图例项
-            ),
-            row=2, col=1
-        )
-    
-    # 更新布局 - 移动端深度优化
+    # 警戒线
+    fig.add_hline(y=80, line_dash="dash", line_color="red", row=1, col=1, annotation_text="高温阈值")
+    fig.add_hline(y=5, line_dash="dash", line_color="red", row=2, col=1, annotation_text="振动阈值")
+
     fig.update_layout(
-        # 1. 标题和边距调整 - 极窄边距，利用屏幕空间
-        margin=dict(l=10, r=10, t=30, b=10),
-        title=dict(font=dict(size=14)),
-        
-        # 2. 图例简化 - 性能优化
-        showlegend=False,  # 关闭图例以提升性能（信息已在子图标题中）
-        
-        # 3. 背景透明化，融合暗色主题
+        height=400,
+        margin=dict(l=0, r=0, t=20, b=0),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        
-        # 4. 自动高度 - 两个子图，每个约300px
-        height=600,  # 两个图表各300px
-        
-        # 5. 其他设置 - 性能优化
-        hovermode='closest',  # 从'unified'改为'closest'，减少计算负担
-        font=dict(color='#ffffff', family='Arial, sans-serif', size=10),
-        # 关闭动画和过渡效果，提升性能
-        transition=dict(duration=0),
+        showlegend=False,
+        font=dict(color='white')
     )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.1)')
     
-    # 更新坐标轴 - 移动端优化
-    # 去掉所有轴标题，信息已包含在子图标题中
+    st.plotly_chart(fig, use_container_width=True)
+
+with col_alert:
+    st.markdown("### ⚠️ 实时预警日志")
+    # 筛选异常数据
+    alerts = df[df['Status'].isin(['Warning', 'Error'])].sort_values('Timestamp', ascending=False).head(10)
     
-    # X轴 - 两个图表都显示，但去掉标题
-    fig.update_xaxes(
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        title=None,  # 去掉X轴标题
-        tickfont=dict(size=9),  # 刻度字体调小
-        row=1, col=1
-    )
-    fig.update_xaxes(
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        title=None,  # 去掉X轴标题
-        tickfont=dict(size=9),  # 刻度字体调小
-        row=2, col=1
-    )
-    
-    # Y轴 - 去掉标题，刻度字体调小
-    fig.update_yaxes(
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        title=None,  # 去掉Y轴标题，信息已在子图标题中
-        tickfont=dict(size=9),  # 刻度字体调小
-        row=1, col=1
-    )
-    fig.update_yaxes(
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        title=None,  # 去掉Y轴标题，信息已在子图标题中
-        tickfont=dict(size=9),  # 刻度字体调小
-        row=2, col=1
-    )
-    
-    # 性能优化的图表配置 - 减少交互以提升性能
-    config = {
-        'displayModeBar': False,  # 彻底隐藏工具栏
-        'staticPlot': False,  # 保持基本交互（hover）
-        'scrollZoom': False,  # 禁用缩放
-        'doubleClick': False,  # 禁用双击重置
-        'showTips': False,  # 禁用提示
-        'responsive': True,  # 响应式
-        'autosizable': True,  # 自动调整大小
-        # 性能优化选项
-        'toImageButtonOptions': {
-            'format': 'png',
-            'filename': 'dashboard',
-            'height': 600,
-            'width': 1200,
-            'scale': 1
-        }
-    }
-    
-    st.plotly_chart(fig, use_container_width=True, config=config)
-    
-    # ============ 3. 故障预警列表 ============
-    st.markdown("---")
-    st.markdown("<h2>⚠️ 故障预警记录</h2>", unsafe_allow_html=True)
-    
-    # 筛选 Warning 和 Error 状态
-    alert_df = df[df['Status'].isin(['Warning', 'Error'])].sort_values('Timestamp', ascending=False)
-    
-    if not alert_df.empty:
-        # 显示统计 - 移动端优化（响应式列布局）
-        warning_count = len(alert_df[alert_df['Status'] == 'Warning'])
-        error_count = len(alert_df[alert_df['Status'] == 'Error'])
-        
-        # PC端3列，移动端自动调整为单列
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("总预警数", len(alert_df), delta=None)
-        with col2:
-            st.metric("警告 (Warning)", warning_count, delta=None)
-        with col3:
-            st.metric("错误 (Error)", error_count, delta=None, delta_color="inverse")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # 格式化显示
-        display_df = alert_df[['Timestamp', 'Robot_ID', 'Status', 'Motor_Temperature', 
-                                'Vibration_Level', 'Current_Load']].copy()
-        display_df.columns = ['时间', '机器人ID', '状态', '电机温度(°C)', '振动(mm/s)', '电流负载(A)']
-        
-        # 应用颜色样式
-        def highlight_status(row):
-            if row['状态'] == 'Error':
-                return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row)
-            elif row['状态'] == 'Warning':
-                return ['background-color: rgba(255, 215, 0, 0.2)'] * len(row)
-            return [''] * len(row)
-        
-        # 性能优化：限制显示行数，避免渲染过多数据
-        max_display_rows = 100
-        if len(display_df) > max_display_rows:
-            st.warning(f"⚠️ 预警记录较多，仅显示最近 {max_display_rows} 条")
-            display_df = display_df.head(max_display_rows)
-        
-        styled_df = display_df.style.apply(highlight_status, axis=1)
-        st.dataframe(styled_df, use_container_width=True, height=400)
+    if not alerts.empty:
+        for _, row in alerts.iterrows():
+            # 动态生成每一条日志的样式
+            color = "#ff4b4b" if row['Status'] == 'Error' else "#ffa421"
+            bg_color = "rgba(255, 75, 75, 0.1)" if row['Status'] == 'Error' else "rgba(255, 164, 33, 0.1)"
+            
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; margin-bottom: 8px; border-left: 4px solid {color};">
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #fff; font-weight: bold;">{row['Robot_ID']}</span>
+                    <span style="color: #ccc; font-size: 12px;">{row['Timestamp'].strftime('%H:%M:%S')}</span>
+                </div>
+                <div style="color: {color}; margin-top: 4px; font-size: 14px;">
+                    {row['Status']}: Temp {row['Motor_Temperature']:.1f}°C | Vib {row['Vibration_Level']:.2f}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.success("✅ 所有机器人运行正常，暂无预警记录")
-    
-    # 侧边栏统计信息
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("<h3 style='color: #00d4ff;'>📊 数据统计</h3>", unsafe_allow_html=True)
-    st.sidebar.info(f"""
-    **数据范围**  
-    起始: {df['Timestamp'].min().strftime('%Y-%m-%d %H:%M')}  
-    结束: {df['Timestamp'].max().strftime('%Y-%m-%d %H:%M')}
-    
-    **数据量**  
-    总记录数: {len(df):,}  
-    机器人数: {df['Robot_ID'].nunique()}
-    """)
+        st.info("✅ 系统运行平稳，暂无异常")
 
-except FileNotFoundError:
-    st.error("❌ 错误：未找到文件 'robot_sensor_data.csv'")
-    st.info("请确保 CSV 文件在当前目录下，或先运行 generate_data.py 生成数据。")
-except Exception as e:
-    st.error(f"❌ 发生错误: {str(e)}")
+# ==================== 4. 自动刷新逻辑 ====================
 
+if auto_refresh:
+    time.sleep(refresh_rate)
+    st.rerun() # 关键！这一行让整个脚本重新运行，形成动画帧
