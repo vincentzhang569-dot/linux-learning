@@ -6,60 +6,28 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 
-# ==================== 1. 页面配置 ====================
+# ==================== 1. 基础配置 ====================
 st.set_page_config(
     page_title="工业监护中心",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS: 强制黑底，修复卡片样式，去掉白色方框背景
+# 强制 CSS：黑底，修复卡片样式
 st.markdown("""
 <style>
     .main, .stApp { background-color: #000000; }
+    #MainMenu, footer, header {visibility: hidden;}
     
-    /* 隐藏 Streamlit 默认头部 */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    /* 顶部容器布局 */
+    .css-18e3th9 { padding-top: 0rem; }
     
-    /* 顶部卡片容器样式 */
-    .card-container {
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-    
-    /* 单个卡片样式 */
-    .robot-card {
-        background-color: #111;
-        border: 1px solid #333;
-        border-radius: 5px;
-        padding: 10px;
-        width: 19%; /* 5个卡片平分 */
-        text-align: center;
-        box-shadow: 0 0 5px rgba(0,0,0,0.5);
-    }
-    
-    /* 状态颜色边框 */
-    .status-normal { border-top: 3px solid #00BFFF; } /* 正常蓝 */
-    .status-warning { border-top: 3px solid #FFA500; } /* 警告橙 */
-    .status-error { border-top: 3px solid #FF0000; }   /* 错误红 */
-    
-    /* 字体样式 */
-    .card-title { color: #fff; font-weight: bold; font-size: 16px; margin-bottom: 5px; }
-    .card-status { font-size: 12px; margin-bottom: 5px; }
-    .card-data { color: #ccc; font-family: monospace; font-size: 13px; }
-    
-    /* 强制图表高度 */
-    .js-plotly-plot { height: 400px !important; }
+    /* 图表容器高度固定 */
+    .js-plotly-plot { height: 450px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== 2. 数据逻辑 ====================
-
+# ==================== 2. 数据引擎 ====================
 ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
 
 if 'data_buffer' not in st.session_state:
@@ -80,20 +48,19 @@ def simulate_data(df):
     last_time = df['Timestamp'].max()
     new_time = last_time + timedelta(seconds=1)
     new_rows = []
-    
     latest = df.sort_values('Timestamp').groupby('Robot_ID').tail(1)
     
     for _, row in latest.iterrows():
         robot = row['Robot_ID']
         temp, vib = row['Temp'], row['Vib']
         
-        # 模拟数据波动
+        # 模拟波动
         temp += np.random.normal(0, 0.3)
         if temp > 80: temp -= 0.5
         if temp < 45: temp += 0.5
         
-        if np.random.random() < 0.1: vib += np.random.choice([0.8, -0.4])
-        vib = max(0.1, vib * 0.92 + np.random.normal(0.05, 0.01))
+        if np.random.random() < 0.1: vib += np.random.choice([0.5, -0.3])
+        vib = max(0.1, vib * 0.95 + np.random.normal(0.05, 0.01))
         
         status = 'Running'
         if temp > 75 or vib > 5: status = 'Error'
@@ -105,124 +72,128 @@ def simulate_data(df):
         })
     return pd.DataFrame(new_rows)
 
-# ==================== 3. 布局结构 ====================
+# ==================== 3. 布局占位符 (一次性建立) ====================
 
-st.markdown("### 🏭 产线核心设备温控中心 (Live Monitor)")
+st.markdown("### 🏭 产线设备实时监控中心")
 
-# 1. 顶部：5个机器人卡片占位符
-top_cards_placeholder = st.empty()
+# 顶部卡片区域
+cards_placeholder = st.empty()
 
-# 2. 下部：左右分栏图表
-# 左边看温度，右边看振动，互不干扰，清晰明了
+# 图表区域 (左右分栏)
 c1, c2 = st.columns(2)
 with c1:
-    st.markdown("**🔵 电机温度监控 (°C)**")
-    temp_chart_placeholder = st.empty()
+    st.markdown("**🔵 电机温度 (Temperature)**")
+    chart_temp_place = st.empty()
 with c2:
-    st.markdown("**🟠 振动频率监控 (mm/s)**")
-    vib_chart_placeholder = st.empty()
+    st.markdown("**🟠 振动频率 (Vibration)**")
+    chart_vib_place = st.empty()
 
 # ==================== 4. 绘图函数 ====================
-
-def create_subplot_chart(df, y_col, color, y_range):
-    # 5行1列的图表，不显示图例，极简模式
+def create_chart(df, data_col, color_hex, y_range):
+    # 创建 5 行 1 列的子图
     fig = make_subplots(
         rows=5, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.03,
-        subplot_titles=None # 去掉标题，为了节省空间，直接写在图里
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        subplot_titles=None
     )
     
     for i, robot in enumerate(ROBOTS):
         r_data = df[df['Robot_ID'] == robot]
         
+        # 线条
         fig.add_trace(go.Scatter(
-            x=r_data['Timestamp'], y=r_data[y_col],
+            x=r_data['Timestamp'], 
+            y=r_data[data_col],
             mode='lines',
-            line=dict(color=color, width=2),
+            line=dict(color=color_hex, width=2),
             showlegend=False
         ), row=i+1, col=1)
         
-        # 在图表左上角内嵌文字，标明是哪个机器人，比外部标题更省空间且不乱
+        # 标签 (内嵌在图表左侧，避免被遮挡)
         fig.add_annotation(
             text=f"<b>{robot}</b>",
-            xref=f"x domain", yref=f"y domain" if i==0 else f"y{i+1} domain",
-            x=0.01, y=0.8, showarrow=False,
-            font=dict(color="white", size=10),
+            xref="paper", yref="paper",
+            x=0.01, y=0.8,
+            showarrow=False,
+            font=dict(color="white", size=12),
             bgcolor="rgba(0,0,0,0.5)"
         )
-
+        
+        # Y轴固定
         fig.update_yaxes(
             range=y_range, 
             row=i+1, col=1, 
-            showgrid=True, gridcolor='#333', 
+            showgrid=True, gridcolor='#222', 
             zeroline=False,
-            tickfont=dict(size=8, color='#888')
+            tickfont=dict(color='#666', size=10)
         )
-        
+
+    # 全局布局
     fig.update_layout(
-        height=500, # 高度适中
+        height=500,
         margin=dict(l=0, r=0, t=10, b=10),
         paper_bgcolor='#000000',
         plot_bgcolor='#000000',
-        hovermode='x unified',
-        xaxis5=dict(showticklabels=False, showgrid=False) # 隐藏底部X轴
+        xaxis5=dict(showticklabels=False, showgrid=False), # 隐藏底部时间轴
+        hovermode=False # 关闭悬停交互以提升极速性能
     )
-    fig.update_xaxes(showgrid=False, visible=False)
+    fig.update_xaxes(visible=False, showgrid=False)
     
     return fig
 
-# ==================== 5. 运行循环 ====================
+# ==================== 5. 主循环 ====================
+
+# 预先定义 HTML 模板，防止缩进导致的渲染错误
+# 这里的 CSS 直接写在 style 标签里，避免外部干扰
+card_style = """
+<style>
+.monitor-container { display: flex; gap: 8px; width: 100%; }
+.monitor-card { 
+    background: #111; 
+    border: 1px solid #333; 
+    border-radius: 4px; 
+    flex: 1; 
+    padding: 10px; 
+    text-align: center; 
+}
+.st-run { border-top: 3px solid #00BFFF; }
+.st-warn { border-top: 3px solid #FFA500; }
+.st-err { border-top: 3px solid #FF0000; }
+.m-title { color: #fff; font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+.m-val { color: #aaa; font-family: monospace; font-size: 12px; }
+</style>
+"""
 
 while True:
-    # --- 数据更新 ---
+    # 1. 更新数据
     new_frame = simulate_data(st.session_state.data_buffer)
     st.session_state.data_buffer = pd.concat([st.session_state.data_buffer, new_frame], ignore_index=True).tail(100)
     df = st.session_state.data_buffer
+    
+    # 2. 生成顶部卡片 HTML (单行压缩，避免缩进错误)
     latest = df.sort_values('Timestamp').groupby('Robot_ID').tail(1)
     
-    # --- 渲染顶部 5 个卡片 (HTML构建) ---
-    # 这一步构建 HTML 字符串，不再会有缩进问题
-    cards_html = '<div class="card-container">'
+    html_content = '<div class="monitor-container">'
     for _, row in latest.iterrows():
-        status = row['Status']
+        status_cls = "st-run" if row['Status']=='Running' else ("st-warn" if row['Status']=='Warning' else "st-err")
+        icon = "🟢" if row['Status']=='Running' else ("🟡" if row['Status']=='Warning' else "🔴")
         
-        # 样式判定
-        if status == 'Running':
-            css_class = 'status-normal'
-            status_color = '#00BFFF'
-            icon = '🟢'
-        elif status == 'Warning':
-            css_class = 'status-warning'
-            status_color = '#FFA500'
-            icon = '🟡'
-        else:
-            css_class = 'status-error'
-            status_color = '#FF0000'
-            icon = '🔴'
-            
-        cards_html += f"""
-        <div class="robot-card {css_class}">
-            <div class="card-title">{row['Robot_ID']}</div>
-            <div class="card-status" style="color:{status_color}">{icon} {status}</div>
-            <div class="card-data">T: {row['Temp']:.1f}°C</div>
-            <div class="card-data">V: {row['Vib']:.2f}</div>
-        </div>
-        """
-    cards_html += '</div>'
+        # 这是一个整块的 HTML 字符串，没有换行符干扰
+        html_content += f"""<div class="monitor-card {status_cls}"><div class="m-title">{row['Robot_ID']}</div><div style="font-size:12px;color:#eee">{icon} {row['Status']}</div><div class="m-val">T:{row['Temp']:.1f} | V:{row['Vib']:.2f}</div></div>"""
+        
+    html_content += '</div>'
     
-    # 渲染卡片
-    top_cards_placeholder.markdown(cards_html, unsafe_allow_html=True)
+    # 渲染卡片 (unsafe_allow_html 必须开启)
+    cards_placeholder.markdown(card_style + html_content, unsafe_allow_html=True)
     
-    # --- 渲染图表 ---
+    # 3. 渲染两个图表
+    # 左边温度
+    fig_t = create_chart(df, 'Temp', '#00BFFF', [40, 90])
+    chart_temp_place.plotly_chart(fig_t, use_container_width=True, config={'staticPlot': True})
     
-    # 左侧：温度 (蓝色)
-    fig_temp = create_subplot_chart(df, 'Temp', '#00BFFF', [40, 90])
-    # 关键：staticPlot=True 彻底禁止交互层，解决手机端闪烁
-    temp_chart_placeholder.plotly_chart(fig_temp, use_container_width=True, config={'staticPlot': True})
+    # 右边振动
+    fig_v = create_chart(df, 'Vib', '#FFA500', [0, 8])
+    chart_vib_place.plotly_chart(fig_v, use_container_width=True, config={'staticPlot': True})
     
-    # 右侧：振动 (橙色)
-    fig_vib = create_subplot_chart(df, 'Vib', '#FFA500', [0, 8])
-    vib_chart_placeholder.plotly_chart(fig_vib, use_container_width=True, config={'staticPlot': True})
-    
-    time.sleep(1.0)
+    time.sleep(1)
