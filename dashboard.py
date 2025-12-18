@@ -13,12 +13,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 强制 CSS：隐藏 Streamlit 元素，固定容器高度防止布局抖动
+# CSS: 纯黑背景 + 蓝色系微调
 st.markdown("""
 <style>
-    .main, .stApp { background-color: #000000; } /* 纯黑背景更像监控 */
+    .main, .stApp { background-color: #000000; }
     
-    /* 卡片样式：极简边框风 */
+    /* 卡片样式 */
     .metric-card {
         background-color: #111;
         border: 1px solid #333;
@@ -27,27 +27,25 @@ st.markdown("""
         padding: 10px;
         margin-bottom: 10px;
     }
-    .status-running { border-left-color: #00ff00; box-shadow: -2px 0 10px rgba(0,255,0,0.1); }
+    /* 状态指示灯颜色 */
+    .status-running { border-left-color: #00BFFF; box-shadow: -2px 0 10px rgba(0,191,255,0.1); } /* 正常改成蓝色 */
     .status-warning { border-left-color: #ffcc00; box-shadow: -2px 0 10px rgba(255,204,0,0.1); }
     .status-error   { border-left-color: #ff0000; box-shadow: -2px 0 10px rgba(255,0,0,0.2); }
     
     .robot-title { color: #fff; font-family: monospace; font-size: 16px; font-weight: bold; }
     .metric-val { color: #aaa; font-family: monospace; font-size: 14px; }
     
-    /* 隐藏右上角菜单 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 关键：强制图表容器不留白，解决微小抖动 */
     .js-plotly-plot { height: 100% !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== 2. 数据引擎 (纯内存计算) ====================
+# ==================== 2. 数据引擎 ====================
 
 ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
 
-# 初始化 Session State
 if 'data_buffer' not in st.session_state:
     now = datetime.now()
     init_data = []
@@ -65,7 +63,6 @@ if 'data_buffer' not in st.session_state:
     st.session_state.data_buffer = pd.DataFrame(init_data)
 
 def simulate_stream(df):
-    """ 生成下一帧数据 (模拟物理惯性) """
     last_time = df['Timestamp'].max()
     new_time = last_time + timedelta(seconds=1)
     new_rows = []
@@ -77,19 +74,17 @@ def simulate_stream(df):
         prev_temp = row['Temp']
         prev_vib = row['Vib']
         
-        # 1. 温度模拟
+        # 模拟逻辑
         delta_t = np.random.normal(0, 0.6) 
         if prev_temp > 85: delta_t = -1.5 
         new_temp = prev_temp + delta_t
         
-        # 2. 振动模拟
         if np.random.random() < 0.05: 
             new_vib = prev_vib + np.random.choice([1.5, -1.0])
         else:
             new_vib = prev_vib + np.random.normal(0, 0.1)
         new_vib = max(0.1, new_vib * 0.95)
         
-        # 3. 状态判定
         status = 'Running'
         if new_temp > 85 or new_vib > 6: status = 'Error'
         elif new_temp > 75 or new_vib > 4: status = 'Warning'
@@ -101,7 +96,7 @@ def simulate_stream(df):
     
     return pd.DataFrame(new_rows)
 
-# ==================== 3. 布局与渲染核心 ====================
+# ==================== 3. 布局 ====================
 
 c1, c2 = st.columns([4, 1])
 c1.markdown("## 📟 产线设备信号监控 (Live Signal)")
@@ -126,7 +121,7 @@ if run:
         
         # B. 渲染时间
         time_placeholder.markdown(
-            f"<div style='text-align:right; font-family:monospace; color:#0f0; font-size:20px'>{datetime.now().strftime('%H:%M:%S')}</div>", 
+            f"<div style='text-align:right; font-family:monospace; color:#00BFFF; font-size:20px'>{datetime.now().strftime('%H:%M:%S')}</div>", 
             unsafe_allow_html=True
         )
         
@@ -137,7 +132,8 @@ if run:
             for i, row in latest.iterrows():
                 stt = row['Status']
                 css_cls = f"status-{stt.lower()}"
-                icon = "🟢" if stt=='Running' else "🟡" if stt=='Warning' else "🔴"
+                # 状态图标颜色
+                icon = "🔵" if stt=='Running' else "🟡" if stt=='Warning' else "🔴"
                 cols[i].markdown(f"""
                 <div class="metric-card {css_cls}">
                     <div class="robot-title">{row['Robot_ID']}</div>
@@ -147,39 +143,40 @@ if run:
                 </div>
                 """, unsafe_allow_html=True)
 
-        # D. 渲染图表 (修复了 xref 报错)
+        # D. 渲染图表
         fig = make_subplots(
             rows=5, cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.02, 
+            vertical_spacing=0.03, 
             subplot_titles=None 
         )
 
         for i, robot in enumerate(ROBOTS):
             r_data = df[df['Robot_ID'] == robot]
             
+            # === 修改颜色为科技蓝 (#00BFFF) ===
             fig.add_trace(go.Scatter(
                 x=r_data['Timestamp'], 
                 y=r_data['Temp'], 
                 mode='lines',
-                line=dict(color='#00ff41', width=2), 
+                line=dict(color='#00BFFF', width=2), # 这里改成了蓝色
                 name=robot,
                 showlegend=False
             ), row=i+1, col=1)
             
-            # === 修复点：处理 x1 和 x 的区别 ===
-            # Plotly 规定：第一个轴叫 "x domain"，第二个叫 "x2 domain"
             target_xref = "x domain" if i == 0 else f"x{i+1} domain"
             target_yref = "y domain" if i == 0 else f"y{i+1} domain"
 
-            # 添加名字标签
+            # 标签
             fig.add_annotation(
                 text=f"<b>{robot}</b>",
-                xref=target_xref, yref=target_yref, # 使用修正后的坐标轴引用
-                x=0.01, y=0.9, showarrow=False,
-                font=dict(color="white", size=10)
+                xref=target_xref, yref=target_yref,
+                x=0.01, y=0.85, showarrow=False,
+                font=dict(color="white", size=10),
+                bgcolor="rgba(0,0,0,0.5)" # 加个半透明背景防遮挡
             )
 
+            # 坐标轴样式
             fig.update_yaxes(
                 range=[20, 100], 
                 row=i+1, col=1,
@@ -190,7 +187,7 @@ if run:
 
         fig.update_layout(
             height=600, 
-            margin=dict(l=10, r=10, t=10, b=10),
+            margin=dict(l=10, r=10, t=20, b=20),
             paper_bgcolor='#000000', 
             plot_bgcolor='#000000',  
             xaxis=dict(showgrid=False, visible=False), 
@@ -198,7 +195,9 @@ if run:
             hovermode='x unified'
         )
 
-        # 关键：静态 Key 适配无硬件加速环境
-        chart_placeholder.plotly_chart(fig, use_container_width=True, key="monitor_chart")
+        # === 修复点：移除了 key="monitor_chart" ===
+        # 因为我们是在 while 循环里调用，chart_placeholder 已经锁定了位置
+        # 直接由占位符负责更新，不需要 Key，这样就不会报错了
+        chart_placeholder.plotly_chart(fig, use_container_width=True)
         
         time.sleep(refresh_rate)
