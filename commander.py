@@ -2,6 +2,7 @@ import json
 import ast
 import random
 import time
+import math  # 引入数学库来实现周期性波动
 import streamlit as st
 
 from core.llm_client import get_client, MODEL_NAME
@@ -260,46 +261,46 @@ toggle_on = st.toggle("启动实时数据流模拟", value=False)
 if toggle_on:
     status_container = st.empty()
     
-    # 连续运行20次（约2秒），实现丝滑跳动
+    # 连续刷新 20 次，每次 0.1秒，总共 2秒 刷新一次页面
     for _ in range(20): 
-        # 1. 记忆与初始化
-        if "monitor_temp" not in st.session_state:
-            st.session_state.monitor_temp = 90.0 # 初始值设高一点，方便你测试
-
-        # 2. 快速随机波动 (幅度大一点，方便冲顶)
-        delta = random.uniform(-2.0, 2.5) 
-        st.session_state.monitor_temp += delta
+        # === 核心算法：基于时间的周期性正弦波 ===
+        # 1. 获取当前时间秒数
+        t = time.time()
         
-        # 3. === 关键修改 === 
-        # 放开上限到 115度，允许超过100度触发报警
-        if st.session_state.monitor_temp > 115.0:
-            st.session_state.monitor_temp = 115.0
-        elif st.session_state.monitor_temp < 50.0:
-            st.session_state.monitor_temp = 50.0
-            
-        current_temp = st.session_state.monitor_temp
-
-        # 4. 渲染界面
+        # 2. 构造正弦波趋势
+        # 周期设为 18秒左右 (系数 0.35 => 2*pi/0.35 ≈ 18)
+        # 基准线 95度，振幅 15度 => 范围在 [80, 110] 之间
+        # 这样就有大概 7-8秒在 100以上，10秒在 100以下
+        trend = 95 + 15 * math.sin(t * 0.35)
+        
+        # 3. 添加高频噪声 (jitter)，让它看起来像真实传感器的跳动
+        jitter = random.uniform(-1.5, 1.5)
+        
+        # 4. 计算最终温度
+        current_temp = trend + jitter
+        
+        # 渲染界面
         with status_container.container():
             col1, col2 = st.columns([1, 3])
             with col1:
-                # 如果超过100度，显示红色
                 if current_temp > 100:
-                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "高温异常", delta_color="inverse")
+                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "🔥 高温报警", delta_color="inverse")
                 else:
-                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "正常")
+                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "✅ 运行正常")
             with col2:
-                # 进度条
-                progress_val = (current_temp - 40) / 80
-                st.progress(min(max(progress_val, 0.0), 1.0))
+                # 进度条显示 (80度-120度范围)
+                # 归一化：(当前-80) / 40
+                progress = (current_temp - 70) / 50
+                st.progress(min(max(progress, 0.0), 1.0))
                 
                 # === 报警检测逻辑 ===
                 if current_temp > 100:
                     now_ts = time.time()
                     elapsed = now_ts - st.session_state.last_alert_time
+                    
                     if elapsed > 300: # 5分钟冷却
-                        # 发送邮件 (这是同步操作，会稍微卡顿一下，正好体现报警了)
-                        st.toast(f"🔥 检测到高温 ({current_temp:.1f}°C)，正在发送报警邮件...", icon="📧")
+                        # 模拟发送邮件
+                        st.toast(f"🔥 峰值警报！温度达 {current_temp:.1f}°C", icon="🚨")
                         try:
                             default_receiver = st.secrets["email"]["SENDER_EMAIL"]
                         except:
@@ -307,18 +308,18 @@ if toggle_on:
                             
                         send_email_action(
                             to_email=default_receiver,
-                            subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
-                            content=f"当前温度：{current_temp:.1f}°C\n请立即检查！"
+                            subject=f"【高温警报】1号机负载过高 ({current_temp:.1f}°C)",
+                            content=f"系统检测到温度周期性波峰。\n当前值：{current_temp:.1f}°C\n请注意散热系统是否正常。"
                         )
                         st.session_state.last_alert_time = now_ts
-                        st.error(f"🔥 严重警告：温度已达 {current_temp:.1f}°C！报警邮件已发出！")
+                        st.error(f"🔥 报警已触发：温度 {current_temp:.1f}°C (邮件已发送)")
                     else:
                         remaining = 300 - int(elapsed)
-                        st.warning(f"⚠️ 温度持续过高！(报警冷却中: {remaining}s)")
+                        st.warning(f"⚠️ 温度处于高位周期... (报警冷却: {remaining}s)")
                 else:
-                    st.caption("✅ 传感器数据实时回传中 (100ms/次)")
+                    st.caption("✅ 温度回落，系统散热中...")
 
-        # 5. 极速休眠
+        # 极速刷新，保证肉眼看到的丝滑跳动
         time.sleep(0.1)
 
     # 循环结束后重载
