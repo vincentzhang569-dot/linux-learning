@@ -16,7 +16,7 @@ if "last_alert_time" not in st.session_state:
     st.session_state.last_alert_time = 0  # 记录上次报警时间戳（秒）
 controller = st.session_state.controller
 
-# --- 2. CSS 样式 ---
+# --- 2. CSS 样式 (保持原样) ---
 st.markdown(
     """
     <style>
@@ -33,7 +33,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- 3. 工具定义（保留 AI 指挥官的指令功能） ---
+# --- 3. 工具定义 (保持原样) ---
 tools = [
     {
         "type": "function",
@@ -89,7 +89,7 @@ tools = [
 ]
 
 
-# --- 4. 执行底层指令 ---
+# --- 4. 执行底层指令 (保持原样) ---
 def execute_command(func_name, args, status_container):
     status_container.write(f"⚙️ **执行**: `{func_name}` | `{args}`")
 
@@ -111,8 +111,8 @@ def execute_command(func_name, args, status_container):
         return {"success": False, "message": f"崩溃: {str(e)}"}
 
 
-# --- 5. 顶部：AI 指挥官对话区域（保留手动查询能力） ---
-st.markdown("### 🎮 工业 AI 指挥中枢")
+# --- 5. 顶部：AI 指挥官对话区域 (保持原样) ---
+st.markdown("### 🎮 工业 AI 指挥中枢")  # 标题没动
 
 status_dict = controller.get_all_status()
 cols = st.columns(len(status_dict))
@@ -145,7 +145,7 @@ for idx, (r_id, data) in enumerate(status_dict.items()):
 
 st.divider()
 
-# --- 6. 聊天逻辑（仅用于手动查询和指令） ---
+# --- 6. 聊天逻辑 (保持原样) ---
 if "cmd_messages" not in st.session_state:
     st.session_state.cmd_messages = [
         {
@@ -253,87 +253,36 @@ if prompt := st.chat_input("💬 下达指令..."):
 
 st.divider()
 
-# --- 7. 实时数据监控 + 自动报警 ---
+# --- 7. 实时数据监控 + 自动报警 (只修改了这里) ---
 st.markdown("### 📡 实时数据监控面板")
 toggle_on = st.toggle("启动实时数据流模拟", value=False)
 
 if toggle_on:
     status_container = st.empty()
     
-    # === 修改处：数据模拟逻辑优化 ===
-    # 1. 初始化模拟温度 (如果不存在)
+    # === 1. 初始化模拟温度 (记忆上次的值，实现连续跳动) ===
     if "monitor_temp" not in st.session_state:
-        st.session_state.monitor_temp = 65.0  # 初始设为 65°C 左右的正常值
+        st.session_state.monitor_temp = 62.5  # 初始设个安全值
 
-    # 2. 模拟真实波动 (Random Walk)
-    # 每次只在当前基础上微调，而不是生成全新的随机数，这样曲线更平滑真实
-    delta = random.uniform(-1.5, 1.5)
+    # === 2. 模拟心跳波动 (每次加减一点点，而不是重新随机) ===
+    delta = random.uniform(-1.2, 1.2)
     st.session_state.monitor_temp += delta
     
-    # 3. 强制约束范围 (55°C - 75°C)
-    # 确保它永远运行在“正常”区域，绝对不会达到 100°C 触发报警
+    # === 3. 安全锁 (强制锁死在 55-75 之间，绝不报警) ===
     if st.session_state.monitor_temp > 75.0:
         st.session_state.monitor_temp = 75.0
     elif st.session_state.monitor_temp < 55.0:
         st.session_state.monitor_temp = 55.0
         
     current_temp = st.session_state.monitor_temp
-    # ===============================
 
     with status_container.container():
-        # 显示当前温度，>100 以红色强调 (虽然逻辑上现在不会超过100了)
-        if current_temp > 100:
-            st.metric(
-                "1号机组温度",
-                f"{current_temp:.1f} °C",
-                delta="高温",
-                delta_color="inverse",
-            )
-        else:
-            st.metric("1号机组温度", f"{current_temp:.1f} °C")
+        # 显示当前温度
+        st.metric("1号机组温度 (实时)", f"{current_temp:.1f} °C")
+        
+        # 始终显示正常，不触发任何报警逻辑
+        st.success("✅ 系统运行平稳 - 温度正常")
 
-        # 自动触发报警逻辑（带 5 分钟冷却）
-        # 注：因为上面限制了 current_temp < 75，这里的 > 100 永远不会触发，系统将一直保持“运行正常”
-        if current_temp > 100:
-            now_ts = time.time()
-            elapsed = now_ts - st.session_state.last_alert_time
-            if elapsed > 300:
-                # 1. 获取执行结果
-                try:
-                    default_receiver = st.secrets["email"]["SENDER_EMAIL"]
-                except Exception:
-                    default_receiver = "your_email@example.com"
-                result_str = send_email_action(
-                    to_email=default_receiver,
-                    subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
-                    content=(
-                        f"检测时间：{time.strftime('%H:%M:%S')}\n"
-                        f"当前温度：{current_temp:.1f}°C\n"
-                        "请立即检查！"
-                    ),
-                )
-
-                # 2. 解析结果
-                try:
-                    result = json.loads(result_str)
-                except Exception:
-                    result = {"status": "error", "msg": f"无法解析邮件发送结果: {result_str}"}
-
-                # 3. 根据真实结果显示信息
-                if result.get("status") == "success":
-                    st.error(f"🔥 温度异常 ({current_temp:.1f}°C)！报警邮件已发送！")
-                    st.session_state.last_alert_time = now_ts
-                else:
-                    st.warning(f"⚠️ 尝试报警，但发送失败：{result.get('msg', '')}")
-                    # 发送失败不更新冷却，便于下次重试
-            else:
-                remaining = 300 - int(elapsed)
-                st.warning(
-                    f"⚠️ 温度持续异常 ({current_temp:.1f}°C)... (报警冷却中，{remaining}秒后可再次触发)"
-                )
-        else:
-            st.success("运行正常")
-
-    # 模拟 2 秒刷新一次
-    time.sleep(2)
+    # 1秒刷新一次，实现“跳动”效果
+    time.sleep(1)
     st.rerun()
