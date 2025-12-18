@@ -253,36 +253,46 @@ if prompt := st.chat_input("💬 下达指令..."):
 
 st.divider()
 
-# --- 7. 实时数据监控 + 自动报警 (只修改了这里) ---
+# --- 7. 实时数据监控 + 自动报警 ---
 st.markdown("### 📡 实时数据监控面板")
 toggle_on = st.toggle("启动实时数据流模拟", value=False)
 
 if toggle_on:
+    # 使用 empty 容器，这是实现局部快速刷新的关键
     status_container = st.empty()
     
-    # === 1. 初始化模拟温度 (记忆上次的值，实现连续跳动) ===
-    if "monitor_temp" not in st.session_state:
-        st.session_state.monitor_temp = 62.5  # 初始设个安全值
+    # === 关键修改：高频循环 ===
+    # 我们不只运行一次就rerun，而是连续运行20次（约2秒）
+    # 这样用户会看到数字疯狂跳动，而不是卡顿
+    for _ in range(20): 
+        # 1. 记忆与初始化
+        if "monitor_temp" not in st.session_state:
+            st.session_state.monitor_temp = 62.5
 
-    # === 2. 模拟心跳波动 (每次加减一点点，而不是重新随机) ===
-    delta = random.uniform(-1.2, 1.2)
-    st.session_state.monitor_temp += delta
-    
-    # === 3. 安全锁 (强制锁死在 55-75 之间，绝不报警) ===
-    if st.session_state.monitor_temp > 75.0:
-        st.session_state.monitor_temp = 75.0
-    elif st.session_state.monitor_temp < 55.0:
-        st.session_state.monitor_temp = 55.0
+        # 2. 快速随机波动 (幅度调小一点，显得更细腻)
+        delta = random.uniform(-0.8, 0.8)
+        st.session_state.monitor_temp += delta
         
-    current_temp = st.session_state.monitor_temp
+        # 3. 严格锁死范围 (绝不报警)
+        if st.session_state.monitor_temp > 75.0:
+            st.session_state.monitor_temp = 75.0
+        elif st.session_state.monitor_temp < 55.0:
+            st.session_state.monitor_temp = 55.0
+            
+        current_temp = st.session_state.monitor_temp
 
-    with status_container.container():
-        # 显示当前温度
-        st.metric("1号机组温度 (实时)", f"{current_temp:.1f} °C")
-        
-        # 始终显示正常，不触发任何报警逻辑
-        st.success("✅ 系统运行平稳 - 温度正常")
+        # 4. 瞬间渲染到界面
+        with status_container.container():
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                st.metric("1号机组温度", f"{current_temp:.1f} °C")
+            with col2:
+                # 给个进度条增加动态感
+                st.progress((current_temp - 40) / 60)
+                st.caption("✅ 传感器数据实时回传中 (100ms/次)")
 
-    # 1秒刷新一次，实现“跳动”效果
-    time.sleep(1)
+        # 5. 极速休眠 (0.1秒刷新一次 = 10帧/秒)
+        time.sleep(0.1)
+
+    # 循环结束后重载页面，防止脚本超时，同时检测用户是否关闭了开关
     st.rerun()
