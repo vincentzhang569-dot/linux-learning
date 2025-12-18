@@ -6,198 +6,187 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 
-# ==================== 1. 页面与CSS配置 ====================
+# ==================== 1. 页面配置 (暗黑模式) ====================
 st.set_page_config(
     page_title="工业监护中心",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS: 纯黑背景 + 蓝色系微调
+# 强制 CSS：纯黑背景，消除所有组件的内边距，防止布局跳动
 st.markdown("""
 <style>
     .main, .stApp { background-color: #000000; }
+    
+    /* 隐藏 Streamlit 默认头部和尾部 */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
     
     /* 卡片样式 */
     .metric-card {
         background-color: #111;
         border: 1px solid #333;
-        border-left: 5px solid #555;
         border-radius: 4px;
         padding: 10px;
-        margin-bottom: 10px;
+        text-align: center;
     }
-    /* 状态指示灯颜色 */
-    .status-running { border-left-color: #00BFFF; box-shadow: -2px 0 10px rgba(0,191,255,0.1); } /* 正常改成蓝色 */
-    .status-warning { border-left-color: #ffcc00; box-shadow: -2px 0 10px rgba(255,204,0,0.1); }
-    .status-error   { border-left-color: #ff0000; box-shadow: -2px 0 10px rgba(255,0,0,0.2); }
     
-    .robot-title { color: #fff; font-family: monospace; font-size: 16px; font-weight: bold; }
-    .metric-val { color: #aaa; font-family: monospace; font-size: 14px; }
-    
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    .js-plotly-plot { height: 100% !important; }
+    /* 强制图表容器高度固定，这是防抖的关键 */
+    iframe { height: 350px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== 2. 数据引擎 ====================
+# ==================== 2. 数据逻辑 ====================
 
 ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
 
+# 初始化 Session State
 if 'data_buffer' not in st.session_state:
     now = datetime.now()
     init_data = []
-    for r_idx, robot in enumerate(ROBOTS):
-        base_temp = 50 + (r_idx * 5)
-        base_vib = 0.5 + (r_idx * 0.2)
-        for i in range(100):
-            ts = now - timedelta(seconds=(100-i))
+    for robot in ROBOTS:
+        # 初始值
+        base_temp = np.random.uniform(45, 65)
+        base_vib = np.random.uniform(0.3, 0.8)
+        for i in range(60): # 初始化60秒数据
+            ts = now - timedelta(seconds=(60-i))
             init_data.append({
                 'Timestamp': ts, 'Robot_ID': robot,
-                'Temp': base_temp + np.random.normal(0, 0.5),
-                'Vib': base_vib + np.random.normal(0, 0.1),
-                'Status': 'Running'
+                'Temp': base_temp, 'Vib': base_vib, 'Status': 'Running'
             })
     st.session_state.data_buffer = pd.DataFrame(init_data)
 
-def simulate_stream(df):
+def simulate_data(df):
+    """ 生成新数据 """
     last_time = df['Timestamp'].max()
     new_time = last_time + timedelta(seconds=1)
     new_rows = []
     
-    last_state = df.sort_values('Timestamp').groupby('Robot_ID').tail(1)
+    # 获取最新状态
+    latest = df.sort_values('Timestamp').groupby('Robot_ID').tail(1)
     
-    for _, row in last_state.iterrows():
+    for _, row in latest.iterrows():
         robot = row['Robot_ID']
-        prev_temp = row['Temp']
-        prev_vib = row['Vib']
+        temp, vib = row['Temp'], row['Vib']
         
-        # 模拟逻辑
-        delta_t = np.random.normal(0, 0.6) 
-        if prev_temp > 85: delta_t = -1.5 
-        new_temp = prev_temp + delta_t
+        # 模拟物理变化
+        # 温度：随机游走
+        temp += np.random.normal(0, 0.4)
+        if temp > 85: temp -= 1.0 # 散热
+        if temp < 40: temp += 0.5
         
-        if np.random.random() < 0.05: 
-            new_vib = prev_vib + np.random.choice([1.5, -1.0])
-        else:
-            new_vib = prev_vib + np.random.normal(0, 0.1)
-        new_vib = max(0.1, new_vib * 0.95)
+        # 振动：偶尔波动
+        if np.random.random() < 0.05: vib += np.random.choice([1.0, -0.5])
+        vib = max(0.1, vib * 0.9 + np.random.normal(0.05, 0.01)) # 阻尼回落
         
+        # 状态
         status = 'Running'
-        if new_temp > 85 or new_vib > 6: status = 'Error'
-        elif new_temp > 75 or new_vib > 4: status = 'Warning'
+        if temp > 80 or vib > 5: status = 'Error'
+        elif temp > 70 or vib > 3: status = 'Warning'
         
         new_rows.append({
             'Timestamp': new_time, 'Robot_ID': robot,
-            'Temp': new_temp, 'Vib': new_vib, 'Status': status
+            'Temp': temp, 'Vib': vib, 'Status': status
         })
-    
     return pd.DataFrame(new_rows)
 
-# ==================== 3. 布局 ====================
+# ==================== 3. 布局结构 (一次性建立，不再循环重建) ====================
 
-c1, c2 = st.columns([4, 1])
-c1.markdown("## 📟 产线设备信号监控 (Live Signal)")
-time_placeholder = c2.empty()
-metrics_placeholder = st.empty()
-chart_placeholder = st.empty()
+st.markdown("## 📟 产线实时监控 (Real-time Monitor)")
 
-with st.sidebar:
-    run = st.toggle('启动实时监控', value=True)
-    refresh_rate = st.slider('刷新间隔 (秒)', 0.1, 2.0, 1.0)
+# 占位符定义：先把坑挖好，后面只填坑，不挖坑
+# 1. 顶部状态栏
+status_placeholder = st.empty()
 
-# ==================== 4. 循环逻辑 ====================
+# 2. 图表区：拆分成左右两列！左边温度，右边振动！
+col_temp, col_vib = st.columns(2)
+
+with col_temp:
+    st.markdown("### 🌡️ 电机温度 (°C)")
+    temp_chart_placeholder = st.empty() # 温度图表的坑
+
+with col_vib:
+    st.markdown("### 📈 振动频率 (mm/s)")
+    vib_chart_placeholder = st.empty() # 振动图表的坑
+
+# ==================== 4. 绘图函数 (高度优化) ====================
+
+def create_chart(df, data_col, color, y_range):
+    """
+    创建一个只包含线条的干净图表
+    """
+    # 使用 Subplots 也是为了对齐，5行1列
+    fig = make_subplots(rows=5, cols=1, shared_xaxes=True, vertical_spacing=0.05, subplot_titles=ROBOTS)
+    
+    for i, robot in enumerate(ROBOTS):
+        r_data = df[df['Robot_ID'] == robot]
+        
+        fig.add_trace(go.Scatter(
+            x=r_data['Timestamp'], y=r_data[data_col],
+            mode='lines',
+            line=dict(color=color, width=2),
+            showlegend=False
+        ), row=i+1, col=1)
+        
+        # 锁死坐标轴，防止跳动
+        fig.update_yaxes(range=y_range, row=i+1, col=1, showgrid=True, gridcolor='#333', zeroline=False)
+        
+    # 全局布局优化
+    fig.update_layout(
+        height=350, # 高度写死
+        margin=dict(l=10, r=10, t=20, b=10), # 边距写死
+        paper_bgcolor='#000000',
+        plot_bgcolor='#000000',
+        font=dict(color='#aaa', size=10),
+        hovermode='x unified',
+        xaxis5=dict(showticklabels=False) # 隐藏底部时间，保持极简
+    )
+    fig.update_xaxes(showgrid=False, visible=False) # 隐藏所有X轴线
+    
+    return fig
+
+# ==================== 5. 主循环 (只更新数据) ====================
+
+# 侧边栏控制
+run = st.sidebar.checkbox('启动监控', value=True)
 
 if run:
     while True:
-        # A. 数据更新
-        new_frame = simulate_stream(st.session_state.data_buffer)
-        st.session_state.data_buffer = pd.concat(
-            [st.session_state.data_buffer, new_frame], ignore_index=True
-        ).tail(300) 
+        # A. 更新数据
+        new_df = simulate_data(st.session_state.data_buffer)
+        st.session_state.data_buffer = pd.concat([st.session_state.data_buffer, new_df], ignore_index=True).tail(60 * 5) # 保留足够数据
         df = st.session_state.data_buffer
         
-        # B. 渲染时间
-        time_placeholder.markdown(
-            f"<div style='text-align:right; font-family:monospace; color:#00BFFF; font-size:20px'>{datetime.now().strftime('%H:%M:%S')}</div>", 
-            unsafe_allow_html=True
-        )
-        
-        # C. 渲染卡片
+        # B. 更新状态栏 (HTML 表格渲染，比 st.metric 更稳，不闪)
         latest = df.sort_values('Timestamp').groupby('Robot_ID').tail(1).reset_index()
-        with metrics_placeholder.container():
-            cols = st.columns(5)
-            for i, row in latest.iterrows():
-                stt = row['Status']
-                css_cls = f"status-{stt.lower()}"
-                # 状态图标颜色
-                icon = "🔵" if stt=='Running' else "🟡" if stt=='Warning' else "🔴"
-                cols[i].markdown(f"""
-                <div class="metric-card {css_cls}">
-                    <div class="robot-title">{row['Robot_ID']}</div>
-                    <div style="font-size:12px; color:#666;">{icon} {stt}</div>
-                    <div class="metric-val">T: {row['Temp']:.1f}°C</div>
-                    <div class="metric-val">V: {row['Vib']:.2f} G</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # D. 渲染图表
-        fig = make_subplots(
-            rows=5, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.03, 
-            subplot_titles=None 
-        )
-
-        for i, robot in enumerate(ROBOTS):
-            r_data = df[df['Robot_ID'] == robot]
-            
-            # === 修改颜色为科技蓝 (#00BFFF) ===
-            fig.add_trace(go.Scatter(
-                x=r_data['Timestamp'], 
-                y=r_data['Temp'], 
-                mode='lines',
-                line=dict(color='#00BFFF', width=2), # 这里改成了蓝色
-                name=robot,
-                showlegend=False
-            ), row=i+1, col=1)
-            
-            target_xref = "x domain" if i == 0 else f"x{i+1} domain"
-            target_yref = "y domain" if i == 0 else f"y{i+1} domain"
-
-            # 标签
-            fig.add_annotation(
-                text=f"<b>{robot}</b>",
-                xref=target_xref, yref=target_yref,
-                x=0.01, y=0.85, showarrow=False,
-                font=dict(color="white", size=10),
-                bgcolor="rgba(0,0,0,0.5)" # 加个半透明背景防遮挡
-            )
-
-            # 坐标轴样式
-            fig.update_yaxes(
-                range=[20, 100], 
-                row=i+1, col=1,
-                showgrid=True, gridcolor='#333', gridwidth=1,
-                zeroline=False,
-                tickfont=dict(size=8, color='#666')
-            )
-
-        fig.update_layout(
-            height=600, 
-            margin=dict(l=10, r=10, t=20, b=20),
-            paper_bgcolor='#000000', 
-            plot_bgcolor='#000000',  
-            xaxis=dict(showgrid=False, visible=False), 
-            xaxis5=dict(showgrid=True, gridcolor='#333', tickfont=dict(color='#666')), 
-            hovermode='x unified'
-        )
-
-        # === 修复点：移除了 key="monitor_chart" ===
-        # 因为我们是在 while 循环里调用，chart_placeholder 已经锁定了位置
-        # 直接由占位符负责更新，不需要 Key，这样就不会报错了
-        chart_placeholder.plotly_chart(fig, use_container_width=True)
         
-        time.sleep(refresh_rate)
+        # 构造 HTML 字符串一次性渲染，而不是用 5 个 st.metric
+        status_html = "<div style='display:flex; justify-content:space-between; margin-bottom:10px'>"
+        for _, row in latest.iterrows():
+            color = "#00BFFF" if row['Status']=='Running' else ("#FFD700" if row['Status']=='Warning' else "#FF0000")
+            status_html += f"""
+            <div style="background:#111; padding:10px; border-left:4px solid {color}; width:19%;">
+                <div style="color:#fff; font-weight:bold;">{row['Robot_ID']}</div>
+                <div style="color:{color}; font-size:12px;">{row['Status']}</div>
+                <div style="color:#ccc; font-size:12px;">T:{row['Temp']:.1f} | V:{row['Vib']:.1f}</div>
+            </div>
+            """
+        status_html += "</div>"
+        status_placeholder.markdown(status_html, unsafe_allow_html=True)
+        
+        # C. 绘制并更新图表
+        
+        # 1. 温度图表 (蓝色)
+        fig_temp = create_chart(df, 'Temp', '#00BFFF', [20, 100])
+        # 【关键】使用 key 强制复用，但这里我们在循环外使用了 empty 容器
+        # 只要容器不变，内容会被替换。为了防闪烁，我们不需要 key 了，直接覆盖。
+        temp_chart_placeholder.plotly_chart(fig_temp, use_container_width=True, config={'staticPlot': True}) 
+        # config={'staticPlot': True} 是大招！它禁止了图表的交互（缩放等），大大减少了重绘负担，彻底消除闪烁。
+        
+        # 2. 振动图表 (橙色/黄色，区分开)
+        fig_vib = create_chart(df, 'Vib', '#FFA500', [0, 8])
+        vib_chart_placeholder.plotly_chart(fig_vib, use_container_width=True, config={'staticPlot': True})
+        
+        # D. 等待
+        time.sleep(1) # 1秒刷新一次
