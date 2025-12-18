@@ -112,7 +112,7 @@ def execute_command(func_name, args, status_container):
 
 
 # --- 5. 顶部：AI 指挥官对话区域 (保持原样) ---
-st.markdown("### 🎮 工业 AI 指挥中枢")  # 标题没动
+st.markdown("### 🎮 工业 AI 指挥中枢")
 
 status_dict = controller.get_all_status()
 cols = st.columns(len(status_dict))
@@ -258,41 +258,68 @@ st.markdown("### 📡 实时数据监控面板")
 toggle_on = st.toggle("启动实时数据流模拟", value=False)
 
 if toggle_on:
-    # 使用 empty 容器，这是实现局部快速刷新的关键
     status_container = st.empty()
     
-    # === 关键修改：高频循环 ===
-    # 我们不只运行一次就rerun，而是连续运行20次（约2秒）
-    # 这样用户会看到数字疯狂跳动，而不是卡顿
+    # 连续运行20次（约2秒），实现丝滑跳动
     for _ in range(20): 
         # 1. 记忆与初始化
         if "monitor_temp" not in st.session_state:
-            st.session_state.monitor_temp = 62.5
+            st.session_state.monitor_temp = 90.0 # 初始值设高一点，方便你测试
 
-        # 2. 快速随机波动 (幅度调小一点，显得更细腻)
-        delta = random.uniform(-0.8, 0.8)
+        # 2. 快速随机波动 (幅度大一点，方便冲顶)
+        delta = random.uniform(-2.0, 2.5) 
         st.session_state.monitor_temp += delta
         
-        # 3. 严格锁死范围 (绝不报警)
-        if st.session_state.monitor_temp > 75.0:
-            st.session_state.monitor_temp = 75.0
-        elif st.session_state.monitor_temp < 55.0:
-            st.session_state.monitor_temp = 55.0
+        # 3. === 关键修改 === 
+        # 放开上限到 115度，允许超过100度触发报警
+        if st.session_state.monitor_temp > 115.0:
+            st.session_state.monitor_temp = 115.0
+        elif st.session_state.monitor_temp < 50.0:
+            st.session_state.monitor_temp = 50.0
             
         current_temp = st.session_state.monitor_temp
 
-        # 4. 瞬间渲染到界面
+        # 4. 渲染界面
         with status_container.container():
             col1, col2 = st.columns([1, 3])
             with col1:
-                st.metric("1号机组温度", f"{current_temp:.1f} °C")
+                # 如果超过100度，显示红色
+                if current_temp > 100:
+                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "高温异常", delta_color="inverse")
+                else:
+                    st.metric("1号机组温度", f"{current_temp:.1f} °C", "正常")
             with col2:
-                # 给个进度条增加动态感
-                st.progress((current_temp - 40) / 60)
-                st.caption("✅ 传感器数据实时回传中 (100ms/次)")
+                # 进度条
+                progress_val = (current_temp - 40) / 80
+                st.progress(min(max(progress_val, 0.0), 1.0))
+                
+                # === 报警检测逻辑 ===
+                if current_temp > 100:
+                    now_ts = time.time()
+                    elapsed = now_ts - st.session_state.last_alert_time
+                    if elapsed > 300: # 5分钟冷却
+                        # 发送邮件 (这是同步操作，会稍微卡顿一下，正好体现报警了)
+                        st.toast(f"🔥 检测到高温 ({current_temp:.1f}°C)，正在发送报警邮件...", icon="📧")
+                        try:
+                            default_receiver = st.secrets["email"]["SENDER_EMAIL"]
+                        except:
+                            default_receiver = "admin@example.com"
+                            
+                        send_email_action(
+                            to_email=default_receiver,
+                            subject=f"【紧急警报】1号机温度异常 ({current_temp:.1f}°C)",
+                            content=f"当前温度：{current_temp:.1f}°C\n请立即检查！"
+                        )
+                        st.session_state.last_alert_time = now_ts
+                        st.error(f"🔥 严重警告：温度已达 {current_temp:.1f}°C！报警邮件已发出！")
+                    else:
+                        remaining = 300 - int(elapsed)
+                        st.warning(f"⚠️ 温度持续过高！(报警冷却中: {remaining}s)")
+                else:
+                    st.caption("✅ 传感器数据实时回传中 (100ms/次)")
 
-        # 5. 极速休眠 (0.1秒刷新一次 = 10帧/秒)
+        # 5. 极速休眠
         time.sleep(0.1)
 
-    # 循环结束后重载页面，防止脚本超时，同时检测用户是否关闭了开关
+    # 循环结束后重载
     st.rerun()
