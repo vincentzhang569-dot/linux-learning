@@ -6,135 +6,16 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 
-# 页面配置
+# ==================== 1. 页面基础配置 (只执行一次) ====================
 st.set_page_config(
     page_title="工业物联网实时监控大屏",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# ==================== 1. 核心：实时数据模拟引擎 ====================
-
-# 初始化机器人配置 (模拟真实的设备参数)
-ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
-
-def init_simulation_data():
-    """初始化历史数据（让图表一开始就有东西看）"""
-    now = datetime.now()
-    data = []
-    
-    for robot in ROBOTS:
-        # 为每个机器人设置不同的初始状态
-        base_temp = np.random.uniform(40, 60)
-        base_vib = np.random.uniform(0.2, 0.8)
-        base_load = np.random.uniform(5, 8)
-        
-        for i in range(100): # 生成过去100个时间点
-            timestamp = now - timedelta(seconds=(100-i)*2)
-            
-            # 添加一些随机波动
-            temp = base_temp + np.random.normal(0, 1.5)
-            vib = base_vib + np.random.normal(0, 0.1)
-            load = base_load + np.random.normal(0, 0.2) + np.sin(i/10)*2
-            
-            # 简单的状态逻辑
-            status = 'Running'
-            if temp > 80 or vib > 5: status = 'Error'
-            elif temp > 70 or vib > 3: status = 'Warning'
-            
-            data.append({
-                'Timestamp': timestamp,
-                'Robot_ID': robot,
-                'Motor_Temperature': temp,
-                'Vibration_Level': max(0, vib), # 振动不能为负
-                'Current_Load': max(0, load),
-                'Status': status
-            })
-    
-    return pd.DataFrame(data)
-
-def generate_next_step(current_df):
-    """生成下一秒的实时数据（基于上一秒的数据进行演变）"""
-    last_timestamp = current_df['Timestamp'].max()
-    new_timestamp = last_timestamp + timedelta(seconds=2) # 模拟每2秒一个数据点
-    
-    new_rows = []
-    
-    # 获取每个机器人的最后一行数据作为基准
-    latest_readings = current_df.sort_values('Timestamp').groupby('Robot_ID').last()
-    
-    for robot in ROBOTS:
-        last_row = latest_readings.loc[robot]
-        
-        # === 模拟物理变化 ===
-        # 1. 温度：有惯性的随机游走
-        change = np.random.normal(0, 0.3) 
-        # 如果温度太高，模拟散热系统启动（强制降温趋势）
-        if last_row['Motor_Temperature'] > 85:
-            change -= 0.5
-        new_temp = last_row['Motor_Temperature'] + change
-        
-        # 2. 振动：偶尔出现尖峰（故障模拟）
-        # 1% 的概率出现震动突增
-        if np.random.random() < 0.01:
-            new_vib = last_row['Vibration_Level'] + np.random.uniform(2, 4)
-        else:
-            # 正常的阻尼回复
-            new_vib = last_row['Vibration_Level'] * 0.95 + np.random.normal(0.2, 0.05)
-            
-        # 3. 负载：周期性正弦波 + 噪声
-        # 利用时间戳的秒数制造周期
-        seconds = new_timestamp.timestamp()
-        new_load = 6 + 3 * np.sin(seconds / 20) + np.random.normal(0, 0.1)
-        
-        # === 状态判定逻辑 ===
-        status = 'Running'
-        if new_temp > 80 or new_vib > 5:
-            status = 'Error'
-        elif new_temp > 70 or new_vib > 3:
-            status = 'Warning'
-            
-        new_rows.append({
-            'Timestamp': new_timestamp,
-            'Robot_ID': robot,
-            'Motor_Temperature': new_temp,
-            'Vibration_Level': max(0, new_vib),
-            'Current_Load': max(0, new_load),
-            'Status': status
-        })
-        
-    return pd.DataFrame(new_rows)
-
-# ==================== 2. 状态管理 ====================
-
-# 如果 session_state 里没有数据，初始化它
-if 'sensor_data' not in st.session_state:
-    st.session_state.sensor_data = init_simulation_data()
-    st.session_state.is_running = True # 默认开启自动刷新
-
-# 侧边栏控制区
-st.sidebar.markdown("### 🎮 模拟器控制台")
-auto_refresh = st.sidebar.toggle('⏱️ 开启实时数据流', value=True)
-refresh_rate = st.sidebar.slider('刷新频率 (秒)', 0.5, 5.0, 1.0)
-
-# 如果开启了自动刷新，更新数据
-if auto_refresh:
-    new_data = generate_next_step(st.session_state.sensor_data)
-    # 追加新数据
-    st.session_state.sensor_data = pd.concat([st.session_state.sensor_data, new_data], ignore_index=True)
-    
-    # 性能优化：保持滑动窗口，只保留最近500条数据，防止内存溢出
-    if len(st.session_state.sensor_data) > 2500: # 5个机器人 * 500点
-        st.session_state.sensor_data = st.session_state.sensor_data.iloc[-2500:]
-
-# 获取当前用于渲染的数据
-df = st.session_state.sensor_data
-
-# ==================== 3. 界面渲染 (保留你原本优秀的 CSS) ====================
-
+# CSS 样式：保持暗黑工业风
 st.markdown("""
 <style>
-    /* 你的 CSS 样式保持不变，我省略了重复部分以节省空间，直接用你原来的即可 */
     .main { background-color: #0e1117; }
     .stApp { background-color: #0e1117; }
     h1, h2, h3 { color: #ffffff; font-family: 'Arial', sans-serif; }
@@ -142,128 +23,232 @@ st.markdown("""
         background: linear-gradient(135deg, #1a1f2e 0%, #252b3f 100%);
         border: 2px solid; border-radius: 10px; padding: 15px;
         text-align: center; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        transition: transform 0.3s;
     }
-    .status-running { border-color: #00ff41; box-shadow: 0 0 15px rgba(0, 255, 65, 0.2); }
-    .status-warning { border-color: #ffd700; box-shadow: 0 0 15px rgba(255, 215, 0, 0.2); }
-    .status-error { border-color: #ff0000; box-shadow: 0 0 15px rgba(255, 0, 0, 0.2); }
+    .status-running { border-color: #00ff41; color: #00ff41; }
+    .status-warning { border-color: #ffd700; color: #ffd700; }
+    .status-error { border-color: #ff0000; color: #ff0000; }
     .robot-name { font-size: 18px; font-weight: bold; color: #fff; }
-    .metric-value { font-size: 14px; color: #b0b0b0; }
+    .metric-value { font-size: 14px; color: #b0b0b0; margin-top: 5px;}
 </style>
 """, unsafe_allow_html=True)
 
+# ==================== 2. 核心：智能数据模拟引擎 ====================
+
+ROBOTS = ['Robot_A01', 'Robot_B02', 'Robot_C03', 'Robot_D04', 'Robot_E05']
+
+def get_status(temp, vib):
+    """根据数值判断状态，实现状态自动流转"""
+    if temp > 85 or vib > 6:
+        return 'Error'
+    elif temp > 75 or vib > 4:
+        return 'Warning'
+    else:
+        return 'Running'
+
+def init_simulation_data():
+    """初始化历史数据：控制开局节奏，不要全崩"""
+    now = datetime.now()
+    data = []
+    
+    for idx, robot in enumerate(ROBOTS):
+        # --- 真实感修改：差异化初始状态 ---
+        # 前3台机器 (A, B, C) 状态良好
+        if idx < 3:
+            base_temp = np.random.uniform(45, 55) # 正常温度
+            base_vib = np.random.uniform(0.2, 0.5)
+        # 后2台机器 (D, E) 有点小毛病
+        else:
+            base_temp = np.random.uniform(70, 78) # 偏高，接近 Warning
+            base_vib = np.random.uniform(2.0, 3.5)
+
+        current_temp = base_temp
+        current_vib = base_vib
+        
+        # 生成过去60秒的数据
+        for i in range(60): 
+            timestamp = now - timedelta(seconds=(60-i))
+            
+            # 温度惯性波动
+            current_temp += np.random.normal(0, 0.5)
+            # 振动波动
+            current_vib = max(0, base_vib + np.random.normal(0, 0.2))
+            
+            status = get_status(current_temp, current_vib)
+            
+            data.append({
+                'Timestamp': timestamp,
+                'Robot_ID': robot,
+                'Motor_Temperature': current_temp,
+                'Vibration_Level': current_vib,
+                'Status': status
+            })
+    
+    return pd.DataFrame(data)
+
+def generate_next_step(current_df):
+    """生成下一秒数据：加入【自愈】和【散热】逻辑"""
+    last_timestamp = current_df['Timestamp'].max()
+    new_timestamp = last_timestamp + timedelta(seconds=1)
+    
+    new_rows = []
+    latest_readings = current_df.sort_values('Timestamp').groupby('Robot_ID').last()
+    
+    for robot in ROBOTS:
+        last_row = latest_readings.loc[robot]
+        last_temp = last_row['Motor_Temperature']
+        last_vib = last_row['Vibration_Level']
+        
+        # === 1. 温度逻辑：加入自动温控模拟 ===
+        change = np.random.normal(0, 0.4) # 默认自然波动
+        
+        if last_temp > 85:
+            # 触发强力散热：温度过高时，大概率下降
+            change = -1.5 + np.random.normal(0, 0.2)
+        elif last_temp > 75:
+            # 触发温和散热
+            change = -0.5 + np.random.normal(0, 0.2)
+        elif last_temp < 40:
+            # 机器预热
+            change = 0.8
+            
+        new_temp = last_temp + change
+        
+        # === 2. 振动逻辑：尖峰后迅速回落 ===
+        if last_vib > 5:
+            # 如果之前震动很大，模拟急停或稳定下来，迅速降低
+            new_vib = last_vib * 0.6 
+        else:
+            # 1% 概率产生一个小冲击
+            if np.random.random() < 0.01:
+                new_vib = last_vib + np.random.uniform(2, 4)
+            else:
+                # 正常微小波动
+                base_vib = 0.5 if 'A' in robot or 'B' in robot else 2.0 # 坏机器底噪大一点
+                new_vib = base_vib + np.random.normal(0, 0.2)
+        
+        new_vib = max(0, new_vib) # 不能小于0
+
+        # === 3. 状态自动更新 (关键：根据新数值重新判定) ===
+        new_status = get_status(new_temp, new_vib)
+            
+        new_rows.append({
+            'Timestamp': new_timestamp,
+            'Robot_ID': robot,
+            'Motor_Temperature': new_temp,
+            'Vibration_Level': new_vib,
+            'Status': new_status
+        })
+        
+    return pd.DataFrame(new_rows)
+
+# ==================== 3. 状态管理 ====================
+
+if 'sensor_data' not in st.session_state:
+    st.session_state.sensor_data = init_simulation_data()
+
+# 侧边栏
+st.sidebar.markdown("### ⚙️ 监控台设置")
+# 默认 2秒刷新一次，避免太快导致视觉疲劳
+refresh_rate = st.sidebar.slider('数据刷新频率 (秒)', 1.0, 5.0, 2.0) 
+auto_refresh = st.sidebar.checkbox('🔴 保持实时连接', value=True)
+
+# 更新数据逻辑
+if auto_refresh:
+    new_data = generate_next_step(st.session_state.sensor_data)
+    st.session_state.sensor_data = pd.concat([st.session_state.sensor_data, new_data], ignore_index=True)
+    # 保持最近 500 行，防止内存溢出
+    if len(st.session_state.sensor_data) > 1000:
+        st.session_state.sensor_data = st.session_state.sensor_data.iloc[-1000:]
+
+df = st.session_state.sensor_data
+
+# ==================== 4. 界面布局 ====================
+
 # 标题栏
-col_title, col_time = st.columns([3, 1])
-with col_title:
-    st.markdown("## 🏭 工业物联网预测性维护大屏 (Live Demo)")
-with col_time:
-    # 显示实时时钟
-    st.markdown(f"<h3 style='text-align: right; color: #00d4ff;'>{datetime.now().strftime('%H:%M:%S')}</h3>", unsafe_allow_html=True)
+col1, col2 = st.columns([4, 1])
+with col1:
+    st.markdown("## 🏭 数字化产线监控中心 (Live)")
+with col2:
+    st.markdown(f"<div style='text-align:right; color:#00d4ff; font-family:monospace; font-size:20px'>{datetime.now().strftime('%H:%M:%S')}</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
-# === 顶部：实时状态卡片 ===
-st.markdown("### 📊 实时设备状态")
-latest_data = df.sort_values('Timestamp').groupby('Robot_ID').last().reset_index()
-
+# 上半部分：状态卡片 (Status Cards)
+latest = df.sort_values('Timestamp').groupby('Robot_ID').last().reset_index()
 cols = st.columns(5)
-for idx, row in latest_data.iterrows():
-    col_idx = idx % 5
+
+for idx, row in latest.iterrows():
     status = row['Status']
-    
-    # 样式逻辑
+    # 样式映射
     if status == 'Running':
-        s_class, s_color, s_icon = 'status-running', '#00ff41', '✓'
+        s_cls, icon = 'status-running', '✅'
     elif status == 'Warning':
-        s_class, s_color, s_icon = 'status-warning', '#ffd700', '⚠'
+        s_cls, icon = 'status-warning', '⚠️'
     else:
-        s_class, s_color, s_icon = 'status-error', '#ff0000', '✕'
-    
-    with cols[col_idx]:
+        s_cls, icon = 'status-error', '🚨'
+        
+    with cols[idx]:
         st.markdown(f"""
-        <div class="metric-card {s_class}">
+        <div class="metric-card {s_cls}">
             <div class="robot-name">{row['Robot_ID']}</div>
-            <div style="font-size: 20px; font-weight: bold; color: {s_color}; margin: 10px 0;">
-                {s_icon} {status}
+            <div style="font-size: 24px; margin: 10px 0;">{icon} {status}</div>
+            <div class="metric-value">
+                🌡️ {row['Motor_Temperature']:.1f}°C <br>
+                📈 {row['Vibration_Level']:.2f} mm/s
             </div>
-            <div class="metric-value">温度: {row['Motor_Temperature']:.1f}°C</div>
-            <div class="metric-value">振动: {row['Vibration_Level']:.2f} mm/s</div>
-            <div class="metric-value">负载: {row['Current_Load']:.2f} A</div>
         </div>
         """, unsafe_allow_html=True)
 
-# === 中部：图表区域 ===
-col_chart, col_alert = st.columns([2, 1])
+# 下半部分：图表区 (Charts) - 重点解决闪烁问题
+st.markdown("### 📊 关键指标实时趋势")
 
-with col_chart:
-    st.markdown("### 📈 实时趋势监控")
-    # 侧边栏选择机器人
-    selected_robot = st.sidebar.selectbox("选择监控对象", ROBOTS, index=0)
+# 准备图表数据（只取最近 60 个点，保证时间窗口平滑）
+chart_data = df[df['Robot_ID'].isin(ROBOTS)].tail(300) # 5个机器人 * 60点
+
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, 
+                    subplot_titles=("核心电机温度 (°C)", "机械振动频率 (mm/s)"))
+
+# 绘制线条
+colors = ['#00d4ff', '#00ff41', '#ffd700', '#ff00ff', '#ffffff']
+for i, robot in enumerate(ROBOTS):
+    r_data = chart_data[chart_data['Robot_ID'] == robot]
     
-    # 过滤数据
-    robot_df = df[df['Robot_ID'] == selected_robot].tail(100) # 只显示最近100个点，营造“实时窗口”感
-    
-    # 使用 Plotly 创建动态图
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.1, row_heights=[0.5, 0.5])
-    
-    # 温度曲线
+    # 温度线
     fig.add_trace(go.Scatter(
-        x=robot_df['Timestamp'], y=robot_df['Motor_Temperature'],
-        mode='lines', name='温度', line=dict(color='#00d4ff', width=2),
-        fill='tozeroy', fillcolor='rgba(0, 212, 255, 0.1)' # 加点填充更好看
+        x=r_data['Timestamp'], y=r_data['Motor_Temperature'],
+        mode='lines', name=f'{robot} Temp',
+        line=dict(width=2, color=colors[i]), showlegend=False
     ), row=1, col=1)
     
-    # 振动曲线
+    # 振动线
     fig.add_trace(go.Scatter(
-        x=robot_df['Timestamp'], y=robot_df['Vibration_Level'],
-        mode='lines', name='振动', line=dict(color='#00ff41', width=2),
-        fill='tozeroy', fillcolor='rgba(0, 255, 65, 0.1)'
+        x=r_data['Timestamp'], y=r_data['Vibration_Level'],
+        mode='lines', name=f'{robot} Vib',
+        line=dict(width=1.5, color=colors[i]), showlegend=True # 只在这里显示图例
     ), row=2, col=1)
-    
-    # 警戒线
-    fig.add_hline(y=80, line_dash="dash", line_color="red", row=1, col=1, annotation_text="高温阈值")
-    fig.add_hline(y=5, line_dash="dash", line_color="red", row=2, col=1, annotation_text="振动阈值")
 
-    fig.update_layout(
-        height=400,
-        margin=dict(l=0, r=0, t=20, b=0),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        showlegend=False,
-        font=dict(color='white')
-    )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridcolor='rgba(255,255,255,0.1)')
-    
-    st.plotly_chart(fig, use_container_width=True)
+# === 关键修改：固定坐标轴范围，防止画面跳动 (Anti-Flicker) ===
+fig.update_layout(
+    height=450,
+    margin=dict(l=10, r=10, t=30, b=10),
+    paper_bgcolor='rgba(0,0,0,0)',
+    plot_bgcolor='rgba(255,255,255,0.05)',
+    font=dict(color='white'),
+    legend=dict(orientation="h", y=-0.2),
+    # 禁用 Plotly 的一些动态效果以提升性能
+    hovermode="x unified"
+)
 
-with col_alert:
-    st.markdown("### ⚠️ 实时预警日志")
-    # 筛选异常数据
-    alerts = df[df['Status'].isin(['Warning', 'Error'])].sort_values('Timestamp', ascending=False).head(10)
-    
-    if not alerts.empty:
-        for _, row in alerts.iterrows():
-            # 动态生成每一条日志的样式
-            color = "#ff4b4b" if row['Status'] == 'Error' else "#ffa421"
-            bg_color = "rgba(255, 75, 75, 0.1)" if row['Status'] == 'Error' else "rgba(255, 164, 33, 0.1)"
-            
-            st.markdown(f"""
-            <div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; margin-bottom: 8px; border-left: 4px solid {color};">
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="color: #fff; font-weight: bold;">{row['Robot_ID']}</span>
-                    <span style="color: #ccc; font-size: 12px;">{row['Timestamp'].strftime('%H:%M:%S')}</span>
-                </div>
-                <div style="color: {color}; margin-top: 4px; font-size: 14px;">
-                    {row['Status']}: Temp {row['Motor_Temperature']:.1f}°C | Vib {row['Vibration_Level']:.2f}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("✅ 系统运行平稳，暂无异常")
+# 锁死 Y 轴范围，这样格子就不会动了，只有线在跑
+fig.update_yaxes(range=[30, 100], row=1, col=1, gridcolor='rgba(255,255,255,0.1)') # 温度固定 30-100
+fig.update_yaxes(range=[0, 10], row=2, col=1, gridcolor='rgba(255,255,255,0.1)')   # 振动固定 0-10
+fig.update_xaxes(showgrid=False)
 
-# ==================== 4. 自动刷新逻辑 ====================
+# 渲染图表
+st.plotly_chart(fig, use_container_width=True, key="live_chart") # 加key防止重绘丢失状态
 
+# 自动刷新触发器
 if auto_refresh:
     time.sleep(refresh_rate)
-    st.rerun() # 关键！这一行让整个脚本重新运行，形成动画帧
+    st.rerun()
